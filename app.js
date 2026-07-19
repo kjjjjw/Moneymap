@@ -125,8 +125,25 @@ async function getFileId() {
   const cached = localStorage.getItem("gagyebu_fileId");
   if (cached) return cached;
   const q = encodeURIComponent(APP_CONFIG.fileName);
-  const result = await graphFetch(`/me/drive/root/search(q='${q}')`);
-  const match = (result.value || []).find((f) => f.name === APP_CONFIG.fileName);
+const candidates = [
+    `/me/drive/special/documents:/가계부/${q}`,
+    `/me/drive/root:/문서/가계부/${q}`,
+    `/me/drive/root:/Documents/가계부/${q}`,
+    `/me/drive/root:/${q}`
+  ];
+  let match = null;
+  for (const path of candidates) {
+    try {
+      match = await graphFetch(path);
+      if (match && match.id) break;
+    } catch (e) {
+      match = null;
+    }
+  }
+  if (!match) {
+    const result = await graphFetch(`/me/drive/root/search(q='${q}')`);
+    match = (result.value || []).find((f) => f.name === APP_CONFIG.fileName);
+  }
   if (!match) throw new Error(`OneDrive에서 '${APP_CONFIG.fileName}' 파일을 찾을 수 없습니다.`);
   localStorage.setItem("gagyebu_fileId", match.id);
   return match.id;
