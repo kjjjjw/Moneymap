@@ -564,23 +564,32 @@ function renderSummary(range, cols) {
   const body = el("summaryBody");
   body.innerHTML = "";
 
-  // 막대는 "계획" 기준 트랙 위에 실적을 채웁니다.
-  // 실적이 계획을 넘으면 트랙 밖으로 오버플로우 세그먼트가 삐져나옵니다.
+  // 달성률(%) — 계획 대비 실적이 몇 %인지
+  function pctInfo(plan, actual, isIncome) {
+    const p = Number(plan || 0);
+    const a = Number(actual || 0);
+    if (p === 0 && a === 0) return { text: "—", cls: "neutral", pct: 0 };
+    if (p === 0) return { text: "계획 없음", cls: isIncome ? "good" : "bad", pct: 100 };
+    const pct = Math.round((a / p) * 100);
+    let cls = "neutral";
+    if (isIncome) cls = pct >= 100 ? "good" : (pct >= 80 ? "neutral" : "bad");
+    else cls = pct > 100 ? "bad" : (pct >= 85 ? "warn" : "good");
+    return { text: pct + "%", cls, pct };
+  }
+
+  // 계획 트랙 위에 실적을 채우고, 넘친 만큼은 트랙 밖으로 빗금 처리
   function barHTML(plan, actual, isIncome) {
     const p = Number(plan || 0);
     const a = Number(actual || 0);
-    const base = Math.max(p, 1); // 0으로 나누기 방지
+    const base = Math.max(p, 1);
     const fillPct = Math.min(100, (a / base) * 100);
-    const overPct = a > p ? Math.min(100, ((a - p) / base) * 100) : 0;
+    const overPct = a > p ? Math.min(60, ((a - p) / base) * 100) : 0;
     const isOver = a > p;
-    // 지출: 넘치면 나쁨(빨강). 소득/저축: 못 채우면 나쁨(옅게), 넘치면 좋음(그대로 채움)
-    const fillClass = isIncome ? "sbar-fill-income" : (isOver ? "sbar-fill-over" : "sbar-fill");
+    const fillClass = isIncome ? "sbar-fill income" : (isOver ? "sbar-fill over" : "sbar-fill");
     return `
-      <div class="sbar" role="img" aria-label="계획 ${fmtWon(p)} 중 실적 ${fmtWon(a)}">
-        <div class="sbar-track">
-          <div class="${fillClass}" style="width:${fillPct}%"></div>
-          ${overPct > 0 ? `<div class="sbar-over" style="width:${overPct}%"></div>` : ""}
-        </div>
+      <div class="sbar-track">
+        <div class="${fillClass}" style="width:${fillPct}%"></div>
+        ${overPct > 0 ? `<div class="sbar-over" style="width:${overPct}%"></div>` : ""}
       </div>
     `;
   }
@@ -590,6 +599,7 @@ function renderSummary(range, cols) {
     const plan = cellFromRange(range, planCol, group.totalRow);
     const actual = cellFromRange(range, actualCol, group.totalRow);
     const diff = fmtDiff(plan, actual, isIncome);
+    const pct = pctInfo(plan, actual, isIncome);
 
     const wrap = document.createElement("div");
     wrap.className = "sgroup";
@@ -600,16 +610,16 @@ function renderSummary(range, cols) {
     const isOpen = expandedMajors.has(group.major);
     head.setAttribute("aria-expanded", String(isOpen));
     head.innerHTML = `
-      <div class="sgroup-toprow">
+      <div class="sgroup-top">
         <span class="sgroup-name">${group.major}</span>
-        <span class="sgroup-caret">${isOpen ? "접기 ▲" : "펼치기 ▼"}</span>
+        <span class="spct ${pct.cls}">${pct.text}</span>
       </div>
       ${barHTML(plan, actual, isIncome)}
-      <div class="sgroup-nums">
-        <span class="snum-block"><em>계획</em>${fmtWon(plan)}</span>
-        <span class="snum-block"><em>실적</em>${fmtWon(actual)}</span>
+      <div class="sgroup-foot">
+        <span class="sfig"><b>${fmtWon(actual)}</b> <i>/ ${fmtWon(plan)}</i></span>
         <span class="sdiff ${diff.cls}">${diff.text}</span>
       </div>
+      <span class="sgroup-toggle">${isOpen ? "닫기" : "자세히"}</span>
     `;
     head.addEventListener("click", () => {
       if (expandedMajors.has(group.major)) expandedMajors.delete(group.major);
@@ -620,29 +630,51 @@ function renderSummary(range, cols) {
     wrap.appendChild(head);
 
     if (isOpen) {
-      const detailList = document.createElement("div");
-      detailList.className = "sgroup-detail";
+      // 세부항목을 소분류별로 묶어 계층을 드러냅니다.
+      const buckets = [];
       for (const r of group.rows) {
-        const p = cellFromRange(range, planCol, r.row);
-        const a = cellFromRange(range, actualCol, r.row);
-        const d = fmtDiff(p, a, isIncome);
-        const line = document.createElement("div");
-        line.className = "sline";
-        const label = r.minor ? `${r.minor} · ${r.detail}` : r.detail;
-        line.innerHTML = `
-          <div class="sline-toprow">
-            <span class="sline-label">${label}</span>
-            <span class="sdiff ${d.cls}">${d.text}</span>
-          </div>
-          ${barHTML(p, a, isIncome)}
-          <div class="sline-nums">
-            <span>계획 ${fmtWon(p)}</span>
-            <span>실적 ${fmtWon(a)}</span>
-          </div>
-        `;
-        detailList.appendChild(line);
+        const key = r.minor || "";
+        let b = buckets.find((x) => x.minor === key);
+        if (!b) { b = { minor: key, items: [] }; buckets.push(b); }
+        b.items.push(r);
       }
-      wrap.appendChild(detailList);
+
+      const detail = document.createElement("div");
+      detail.className = "sgroup-detail";
+
+      for (const bucket of buckets) {
+        const sub = document.createElement("div");
+        sub.className = "ssub";
+        let html = "";
+        if (bucket.minor) {
+          html += `<div class="ssub-head"><span class="ssub-tag">소분류</span>${bucket.minor}</div>`;
+        }
+        html += `<div class="ssub-items">`;
+        for (const r of bucket.items) {
+          const p = cellFromRange(range, planCol, r.row);
+          const a = cellFromRange(range, actualCol, r.row);
+          const d = fmtDiff(p, a, isIncome);
+          const ip = pctInfo(p, a, isIncome);
+          html += `
+            <div class="sitem">
+              <div class="sitem-top">
+                <span class="sitem-name">${r.detail}</span>
+                <span class="spct sm ${ip.cls}">${ip.text}</span>
+              </div>
+              ${barHTML(p, a, isIncome)}
+              <div class="sitem-foot">
+                <span class="sfig"><b>${fmtWon(a)}</b> <i>/ ${fmtWon(p)}</i></span>
+                <span class="sdiff sm ${d.cls}">${d.text}</span>
+              </div>
+            </div>
+          `;
+        }
+        html += `</div>`;
+        sub.innerHTML = html;
+        detail.appendChild(sub);
+      }
+
+      wrap.appendChild(detail);
     }
 
     body.appendChild(wrap);
@@ -651,6 +683,7 @@ function renderSummary(range, cols) {
   const grandPlan = cellFromRange(range, planCol, GRAND_TOTAL_ROW);
   const grandActual = cellFromRange(range, actualCol, GRAND_TOTAL_ROW);
   const grandDiff = fmtDiff(grandPlan, grandActual, false);
+  const grandPct = pctInfo(grandPlan, grandActual, false);
   const netPlan = cellFromRange(range, planCol, NET_ROW);
   const netActual = cellFromRange(range, actualCol, NET_ROW);
 
@@ -658,13 +691,13 @@ function renderSummary(range, cols) {
   totalWrap.className = "sgroup stotal";
   totalWrap.innerHTML = `
     <div class="sgroup-head is-static">
-      <div class="sgroup-toprow">
+      <div class="sgroup-top">
         <span class="sgroup-name">지출 합계</span>
+        <span class="spct ${grandPct.cls}">${grandPct.text}</span>
       </div>
       ${barHTML(grandPlan, grandActual, false)}
-      <div class="sgroup-nums">
-        <span class="snum-block"><em>계획</em>${fmtWon(grandPlan)}</span>
-        <span class="snum-block"><em>실적</em>${fmtWon(grandActual)}</span>
+      <div class="sgroup-foot">
+        <span class="sfig"><b>${fmtWon(grandActual)}</b> <i>/ ${fmtWon(grandPlan)}</i></span>
         <span class="sdiff ${grandDiff.cls}">${grandDiff.text}</span>
       </div>
     </div>
