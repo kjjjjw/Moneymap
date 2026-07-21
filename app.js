@@ -6,7 +6,7 @@ const CATEGORY_TREE = {
   },
   "생활비": {
     "식비": ["개인식비 (준우)", "개인식비 (소희)", "장보기", "외식비"],
-    "취미": ["준우 탁구장 이용료", "소히 네일, 요가"],
+    "취미": ["준우 탁구장 이용료", "소희 네일, 요가"],
     "용돈": ["준우", "소희"],
     "교통비": ["준우", "소희"],
     "여행": ["여행"],
@@ -27,6 +27,8 @@ const CATEGORY_TREE = {
   }
 };
 
+const PAGE_SIZE = 20;
+
 const msalInstance = new msal.PublicClientApplication({
   auth: {
     clientId: APP_CONFIG.clientId,
@@ -40,57 +42,79 @@ const GRAPH_SCOPES = ["Files.ReadWrite"];
 
 const el = (id) => document.getElementById(id);
 
+// ── 목록 상태 ──────────────────────────────────────────────
+let loadedRows = [];        // { index, values } — 최신 항목이 배열 앞쪽
+let totalRows = 0;
+let isLoading = false;
+
+// ── 수정 상태 ──────────────────────────────────────────────
+let editingIndex = null;    // 표 안에서의 행 위치
+let editingOriginal = null; // 불러왔을 때의 값 (덮어쓰기 전 대조용)
+
 function todayStr() {
   const d = new Date();
   const tzOffsetMs = d.getTimezoneOffset() * 60000;
   return new Date(d - tzOffsetMs).toISOString().slice(0, 10);
 }
 
-function populateMajor() {
-  const majorSel = el("major");
-  majorSel.innerHTML = "";
-  for (const major of Object.keys(CATEGORY_TREE)) {
-    const opt = document.createElement("option");
-    opt.value = major;
-    opt.textContent = major;
-    majorSel.appendChild(opt);
+// 엑셀 날짜는 문자열로 올 수도, 일련번호(숫자)로 올 수도 있습니다.
+function toDateInput(v) {
+  if (typeof v === "number" && isFinite(v)) {
+    return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
   }
-  populateMinor();
+  const s = String(v ?? "").trim();
+  const m = s.match(/(\d{4})[-./\s]+(\d{1,2})[-./\s]+(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  return s;
 }
 
-function populateMinor() {
+function norm(v) {
+  return String(v ?? "").trim();
+}
+
+function sameRow(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((v, i) => norm(v) === norm(b[i]));
+}
+
+// ── 분류 셀렉트 ────────────────────────────────────────────
+function fillSelect(sel, items, selected) {
+  sel.innerHTML = "";
+  const list = items.slice();
+  if (selected && !list.includes(selected)) list.push(selected); // 표에만 있는 옛 항목 보존
+  for (const item of list) {
+    const opt = document.createElement("option");
+    opt.value = item;
+    opt.textContent = item;
+    sel.appendChild(opt);
+  }
+  if (selected) sel.value = selected;
+}
+
+function populateMajor(major, minor, detail) {
+  fillSelect(el("major"), Object.keys(CATEGORY_TREE), major);
+  populateMinor(minor, detail);
+}
+
+function populateMinor(minor, detail) {
   const major = el("major").value;
-  const minorSel = el("minor");
-  minorSel.innerHTML = "";
-  for (const minor of Object.keys(CATEGORY_TREE[major] || {})) {
-    const opt = document.createElement("option");
-    opt.value = minor;
-    opt.textContent = minor;
-    minorSel.appendChild(opt);
-  }
-  populateDetail();
+  fillSelect(el("minor"), Object.keys(CATEGORY_TREE[major] || {}), minor);
+  populateDetail(detail);
 }
 
-function populateDetail() {
+function populateDetail(detail) {
   const major = el("major").value;
   const minor = el("minor").value;
-  const detailSel = el("detail");
-  detailSel.innerHTML = "";
-  const details = (CATEGORY_TREE[major] || {})[minor] || [];
-  for (const detail of details) {
-    const opt = document.createElement("option");
-    opt.value = detail;
-    opt.textContent = detail;
-    detailSel.appendChild(opt);
-  }
+  fillSelect(el("detail"), (CATEGORY_TREE[major] || {})[minor] || [], detail);
 }
 
 function showStatus(msg, isError) {
   const s = el("statusMsg");
   s.textContent = msg;
-  s.className = "status" + (isError ? " error" : " success");
+  s.className = "status" + (isError ? " error" : msg ? " success" : "");
 }
 
+// ── Graph 호출 ─────────────────────────────────────────────
 async function getAccessToken() {
   const account = msalInstance.getAllAccounts()[0];
   if (!account) throw new Error("로그인이 필요합니다.");
@@ -125,7 +149,7 @@ async function getFileId() {
   const cached = localStorage.getItem("gagyebu_fileId");
   if (cached) return cached;
   const q = encodeURIComponent(APP_CONFIG.fileName);
-const candidates = [
+  const candidates = [
     `/me/drive/special/documents:/가계부/${q}`,
     `/me/drive/root:/문서/가계부/${q}`,
     `/me/drive/root:/Documents/가계부/${q}`,
@@ -153,12 +177,12 @@ function tablePath(fileId) {
   return `/me/drive/items/${fileId}/workbook/tables/${encodeURIComponent(APP_CONFIG.tableName)}`;
 }
 
-async function addRow(values) {
-  const fileId = await getFileId();
-  await graphFetch(`${tablePath(fileId)}/rows/add`, {
-    method: "POST",
-    body: JSON.stringify({ values: [values] })
-  });
+function rowPath(fileId, index) {
+  // /rows/{index} 형식은 ApiNotFound가 나는 경우가 있어 ItemAt을 씁니다.
+  return `${tablePath(fileId)}/rows/$/ItemAt(index=${index})`;
+}
+
+async function recalc(fileId) {
   try {
     await graphFetch(`/me/drive/items/${fileId}/workbook/application/calculate`, {
       method: "POST",
@@ -169,65 +193,257 @@ async function addRow(values) {
   }
 }
 
-async function loadRecent() {
+async function getRowCount(fileId) {
+  try {
+    const range = await graphFetch(`${tablePath(fileId)}/dataBodyRange?$select=rowCount`);
+    if (range && typeof range.rowCount === "number") return range.rowCount;
+  } catch (e) {
+    // 아래 폴백으로 진행
+  }
+  const all = await graphFetch(`${tablePath(fileId)}/rows?$select=index`);
+  return (all.value || []).length;
+}
+
+// ── 쓰기 ───────────────────────────────────────────────────
+async function addRow(values) {
+  const fileId = await getFileId();
+  await graphFetch(`${tablePath(fileId)}/rows/add`, {
+    method: "POST",
+    body: JSON.stringify({ values: [values] })
+  });
+  await recalc(fileId);
+}
+
+// 목록을 불러온 뒤 다른 곳에서 행이 지워지면 index가 밀립니다.
+// 쓰기 직전에 그 행만 다시 읽어 값이 그대로인지 확인합니다.
+async function assertRowUnchanged(fileId, index, expected) {
+  const row = await graphFetch(rowPath(fileId, index));
+  const actual = (row && row.values && row.values[0]) || null;
+  if (!sameRow(expected, actual)) {
+    throw new Error("이 내역이 다른 곳에서 바뀌었습니다. 새로고침한 뒤 다시 시도하세요.");
+  }
+}
+
+async function updateRow(index, original, values) {
+  const fileId = await getFileId();
+  await assertRowUnchanged(fileId, index, original);
+  await graphFetch(rowPath(fileId, index), {
+    method: "PATCH",
+    body: JSON.stringify({ values: [values] })
+  });
+  await recalc(fileId);
+}
+
+async function deleteRow(index, original) {
+  const fileId = await getFileId();
+  await assertRowUnchanged(fileId, index, original);
+  await graphFetch(rowPath(fileId, index), { method: "DELETE" });
+  await recalc(fileId);
+}
+
+// ── 목록 읽기 (뒤에서부터 20개씩) ──────────────────────────
+async function loadRows(reset) {
+  if (isLoading) return;
+  isLoading = true;
   const list = el("recentList");
-  list.innerHTML = "<li class='muted'>불러오는 중...</li>";
+  const moreBtn = el("moreBtn");
+  moreBtn.disabled = true;
+
   try {
     const fileId = await getFileId();
-    const data = await graphFetch(`${tablePath(fileId)}/rows`);
-    const rows = (data.value || []).slice(-10).reverse();
-    if (rows.length === 0) {
-      list.innerHTML = "<li class='muted'>입력된 내역이 없습니다.</li>";
-      return;
+    if (reset) {
+      loadedRows = [];
+      list.innerHTML = "<li class='muted'>불러오는 중...</li>";
+      el("listMeta").textContent = "";
+      totalRows = await getRowCount(fileId);
+    } else {
+      moreBtn.textContent = "불러오는 중...";
     }
-    list.innerHTML = "";
-    for (const row of rows) {
-      const [date, major, minor, detail, memo, amount] = row.values[0];
-      const li = document.createElement("li");
-      const amountStr = Number(amount).toLocaleString("ko-KR");
-      li.innerHTML = `<span class="rdate">${date}</span><span class="rcat">${major} · ${minor} · ${detail}</span><span class="ramt">${amountStr}원</span>${memo ? `<span class="rmemo">${memo}</span>` : ""}`;
-      list.appendChild(li);
+
+    const remaining = totalRows - loadedRows.length;
+    if (remaining > 0) {
+      const top = Math.min(PAGE_SIZE, remaining);
+      const skip = remaining - top;
+      const data = await graphFetch(`${tablePath(fileId)}/rows?$top=${top}&$skip=${skip}`);
+      const batch = (data.value || []).map((r, i) => ({
+        index: typeof r.index === "number" ? r.index : skip + i,
+        values: (r.values && r.values[0]) || []
+      }));
+      loadedRows = loadedRows.concat(batch.reverse()); // 최신이 위로
     }
+    renderRows();
   } catch (e) {
-    list.innerHTML = `<li class='muted'>불러오기 실패: ${e.message}</li>`;
+    if (reset) el("recentList").innerHTML = "";
+    el("listMeta").textContent = "내역을 불러오지 못했습니다: " + e.message;
+  } finally {
+    isLoading = false;
+    moreBtn.textContent = "더 보기";
+    moreBtn.disabled = false;
   }
+}
+
+function renderRows() {
+  const list = el("recentList");
+  list.innerHTML = "";
+
+  if (loadedRows.length === 0) {
+    list.innerHTML = "<li class='muted'>아직 입력한 내역이 없습니다. 위에서 첫 지출을 남겨보세요.</li>";
+  }
+
+  for (const row of loadedRows) {
+    const [date, major, minor, detail, memo, amount] = row.values;
+    const li = document.createElement("li");
+    if (row.index === editingIndex) li.classList.add("is-editing");
+
+    const dateEl = document.createElement("span");
+    dateEl.className = "rdate";
+    dateEl.textContent = toDateInput(date);
+
+    const catEl = document.createElement("span");
+    catEl.className = "rcat";
+    catEl.textContent = [major, minor, detail].filter(Boolean).join(" · ");
+
+    const amtEl = document.createElement("span");
+    amtEl.className = "ramt";
+    amtEl.textContent = Number(amount || 0).toLocaleString("ko-KR") + "원";
+
+    li.append(dateEl, catEl, amtEl);
+
+    if (memo) {
+      const memoEl = document.createElement("span");
+      memoEl.className = "rmemo";
+      memoEl.textContent = memo;
+      li.append(memoEl);
+    }
+
+    const actions = document.createElement("span");
+    actions.className = "ractions";
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "linklike";
+    editBtn.textContent = "수정";
+    editBtn.addEventListener("click", () => startEdit(row));
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "linklike danger";
+    delBtn.textContent = "삭제";
+    delBtn.addEventListener("click", () => handleDelete(row));
+
+    actions.append(editBtn, delBtn);
+    li.append(actions);
+    list.appendChild(li);
+  }
+
+  const more = totalRows - loadedRows.length;
+  el("moreBtn").hidden = more <= 0;
+  el("listMeta").textContent = totalRows
+    ? `전체 ${totalRows.toLocaleString("ko-KR")}건 중 ${loadedRows.length.toLocaleString("ko-KR")}건`
+    : "";
+}
+
+// ── 수정 모드 ──────────────────────────────────────────────
+function startEdit(row) {
+  const [date, major, minor, detail, memo, amount] = row.values;
+  editingIndex = row.index;
+  editingOriginal = row.values.slice();
+
+  el("date").value = toDateInput(date);
+  populateMajor(norm(major), norm(minor), norm(detail));
+  el("memo").value = norm(memo);
+  el("amount").value = Number(amount || 0);
+
+  el("editBanner").hidden = false;
+  el("editBanner").textContent = `${toDateInput(date)} · ${norm(detail)} 내역을 수정하는 중`;
+  el("submitBtn").textContent = "수정 저장";
+  el("cancelEditBtn").hidden = false;
+  showStatus("", false);
+  renderRows();
+
+  el("entryForm").scrollIntoView({ behavior: "smooth", block: "start" });
+  el("amount").focus();
+}
+
+function cancelEdit() {
+  editingIndex = null;
+  editingOriginal = null;
+  el("editBanner").hidden = true;
+  el("submitBtn").textContent = "입력";
+  el("cancelEditBtn").hidden = true;
+  el("date").value = todayStr();
+  el("memo").value = "";
+  el("amount").value = "";
+  populateMajor();
+  showStatus("", false);
+  renderRows();
+}
+
+function formValues() {
+  return [
+    el("date").value,
+    el("major").value,
+    el("minor").value,
+    el("detail").value,
+    el("memo").value,
+    Number(el("amount").value)
+  ];
 }
 
 async function handleSubmit(e) {
   e.preventDefault();
   const submitBtn = el("submitBtn");
   submitBtn.disabled = true;
-  showStatus("저장 중...", false);
+  const editing = editingIndex !== null;
+  showStatus(editing ? "수정하는 중..." : "저장하는 중...", false);
+
   try {
-    const values = [
-      el("date").value,
-      el("major").value,
-      el("minor").value,
-      el("detail").value,
-      el("memo").value,
-      Number(el("amount").value)
-    ];
-    await addRow(values);
-    showStatus("저장되었습니다.", false);
-    el("amount").value = "";
-    el("memo").value = "";
-    loadRecent();
-  } catch (e) {
-    showStatus(e.message, true);
+    const values = formValues();
+    if (editing) {
+      await updateRow(editingIndex, editingOriginal, values);
+      cancelEdit();
+      showStatus("수정했습니다.", false);
+    } else {
+      await addRow(values);
+      showStatus("저장했습니다.", false);
+      el("amount").value = "";
+      el("memo").value = "";
+    }
+    await loadRows(true);
+  } catch (err) {
+    showStatus(err.message, true);
   } finally {
     submitBtn.disabled = false;
   }
 }
 
+async function handleDelete(row) {
+  const [date, , , detail, , amount] = row.values;
+  const label = `${toDateInput(date)} · ${norm(detail)} · ${Number(amount || 0).toLocaleString("ko-KR")}원`;
+  if (!window.confirm(`이 내역을 삭제할까요?\n\n${label}\n\n엑셀에서도 함께 지워지며 되돌릴 수 없습니다.`)) return;
+
+  showStatus("삭제하는 중...", false);
+  try {
+    await deleteRow(row.index, row.values);
+    if (editingIndex === row.index) cancelEdit();
+    showStatus("삭제했습니다.", false);
+    await loadRows(true); // 삭제하면 뒤쪽 행 index가 밀리므로 전체를 다시 읽습니다
+  } catch (err) {
+    showStatus(err.message, true);
+  }
+}
+
+// ── 로그인 상태 ────────────────────────────────────────────
 function showApp() {
   el("loginArea").hidden = true;
   el("mainArea").hidden = false;
-  el("authArea").innerHTML = `<span class="who">${msalInstance.getAllAccounts()[0].username}</span> <button type="button" id="logoutBtn" class="linklike">로그아웃</button>`;
+  el("authArea").innerHTML = `<span class="who"></span> <button type="button" id="logoutBtn" class="linklike">로그아웃</button>`;
+  el("authArea").querySelector(".who").textContent = msalInstance.getAllAccounts()[0].username;
   el("logoutBtn").addEventListener("click", () => {
     localStorage.removeItem("gagyebu_fileId");
     msalInstance.logoutRedirect();
   });
-  loadRecent();
+  loadRows(true);
 }
 
 function showLogin() {
@@ -239,10 +455,12 @@ function showLogin() {
 async function init() {
   el("date").value = todayStr();
   populateMajor();
-  el("major").addEventListener("change", populateMinor);
-  el("minor").addEventListener("change", populateDetail);
+  el("major").addEventListener("change", () => populateMinor());
+  el("minor").addEventListener("change", () => populateDetail());
   el("entryForm").addEventListener("submit", handleSubmit);
-  el("refreshBtn").addEventListener("click", loadRecent);
+  el("cancelEditBtn").addEventListener("click", cancelEdit);
+  el("refreshBtn").addEventListener("click", () => loadRows(true));
+  el("moreBtn").addEventListener("click", () => loadRows(false));
   el("loginBtn").addEventListener("click", () => msalInstance.loginRedirect({ scopes: GRAPH_SCOPES }));
 
   try {

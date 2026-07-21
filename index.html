@@ -20,6 +20,8 @@
 
   <main id="mainArea" hidden>
     <form id="entryForm" class="card">
+      <p id="editBanner" class="edit-banner" hidden></p>
+
       <div class="field">
         <label for="date">날짜</label>
         <input type="date" id="date" required>
@@ -51,15 +53,18 @@
       </div>
 
       <button type="submit" id="submitBtn">입력</button>
+      <button type="button" id="cancelEditBtn" class="secondary-btn" hidden>수정 취소</button>
       <p id="statusMsg" class="status" role="status"></p>
     </form>
 
     <section class="card recent">
       <div class="recent-header">
-        <h2>최근 입력 내역</h2>
+        <h2>입력 내역</h2>
         <button type="button" id="refreshBtn" class="linklike">새로고침</button>
       </div>
       <ul id="recentList" class="recent-list"></ul>
+      <button type="button" id="moreBtn" class="secondary-btn more-btn" hidden>더 보기</button>
+      <p id="listMeta" class="list-meta" role="status"></p>
     </section>
   </main>
 
