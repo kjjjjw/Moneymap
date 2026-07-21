@@ -438,6 +438,7 @@ let summaryYear = null;
 let summaryMonth = null;
 let summaryMode = "month";
 let expandedMajors = new Set();
+let expandedMinors = new Set(); // "대분류::소분류" 형태로 저장
 
 function summarySheetPath() {
   return `/me/drive/items/${cachedFileId()}/workbook/worksheets/${encodeURIComponent(APP_CONFIG.summarySheet)}`;
@@ -622,15 +623,22 @@ function renderSummary(range, cols) {
       <span class="sgroup-toggle">${isOpen ? "닫기" : "자세히"}</span>
     `;
     head.addEventListener("click", () => {
-      if (expandedMajors.has(group.major)) expandedMajors.delete(group.major);
-      else expandedMajors.add(group.major);
+      if (expandedMajors.has(group.major)) {
+        expandedMajors.delete(group.major);
+        // 대분류를 접으면 그 아래 소분류 펼침 상태도 정리합니다.
+        for (const key of Array.from(expandedMinors)) {
+          if (key.startsWith(group.major + "::")) expandedMinors.delete(key);
+        }
+      } else {
+        expandedMajors.add(group.major);
+      }
       renderSummary(range, cols);
     });
 
     wrap.appendChild(head);
 
     if (isOpen) {
-      // 세부항목을 소분류별로 묶어 계층을 드러냅니다.
+      // 1단계: 소분류. 시트에 소분류 소계 행이 없으므로 세부항목 값을 합산합니다.
       const buckets = [];
       for (const r of group.rows) {
         const key = r.minor || "";
@@ -643,34 +651,76 @@ function renderSummary(range, cols) {
       detail.className = "sgroup-detail";
 
       for (const bucket of buckets) {
-        const sub = document.createElement("div");
-        sub.className = "ssub";
-        let html = "";
-        if (bucket.minor) {
-          html += `<div class="ssub-head"><span class="ssub-tag">소분류</span>${bucket.minor}</div>`;
-        }
-        html += `<div class="ssub-items">`;
+        let bPlan = 0;
+        let bActual = 0;
         for (const r of bucket.items) {
-          const p = cellFromRange(range, planCol, r.row);
-          const a = cellFromRange(range, actualCol, r.row);
-          const d = fmtDiff(p, a, isIncome);
-          const ip = pctInfo(p, a, isIncome);
-          html += `
-            <div class="sitem">
-              <div class="sitem-top">
-                <span class="sitem-name">${r.detail}</span>
-                <span class="spct sm ${ip.cls}">${ip.text}</span>
-              </div>
-              ${barHTML(p, a, isIncome)}
-              <div class="sitem-foot">
-                <span class="sfig"><b>${fmtWon(a)}</b> <i>/ ${fmtWon(p)}</i></span>
-                <span class="sdiff sm ${d.cls}">${d.text}</span>
-              </div>
+          bPlan += Number(cellFromRange(range, planCol, r.row) || 0);
+          bActual += Number(cellFromRange(range, actualCol, r.row) || 0);
+        }
+        const bDiff = fmtDiff(bPlan, bActual, isIncome);
+        const bPct = pctInfo(bPlan, bActual, isIncome);
+        const minorKey = `${group.major}::${bucket.minor}`;
+        const minorOpen = !bucket.minor || expandedMinors.has(minorKey);
+
+        const sub = document.createElement("div");
+        sub.className = "ssub" + (minorOpen ? " is-open" : "");
+
+        // 소분류가 없는 그룹(소득 등)은 소분류 행 없이 세부항목만 보여줍니다.
+        if (bucket.minor) {
+          const subHead = document.createElement("button");
+          subHead.type = "button";
+          subHead.className = "ssub-head";
+          subHead.setAttribute("aria-expanded", String(minorOpen));
+          subHead.innerHTML = `
+            <div class="ssub-top">
+              <span class="ssub-name">${bucket.minor}</span>
+              <span class="ssub-right">
+                <span class="spct sm ${bPct.cls}">${bPct.text}</span>
+                <span class="ssub-caret">${minorOpen ? "▲" : "▼"}</span>
+              </span>
+            </div>
+            ${barHTML(bPlan, bActual, isIncome)}
+            <div class="ssub-foot">
+              <span class="sfig"><b>${fmtWon(bActual)}</b> <i>/ ${fmtWon(bPlan)}</i></span>
+              <span class="sdiff sm ${bDiff.cls}">${bDiff.text}</span>
             </div>
           `;
+          subHead.addEventListener("click", () => {
+            if (expandedMinors.has(minorKey)) expandedMinors.delete(minorKey);
+            else expandedMinors.add(minorKey);
+            renderSummary(range, cols);
+          });
+          sub.appendChild(subHead);
         }
-        html += `</div>`;
-        sub.innerHTML = html;
+
+        // 2단계: 세부항목
+        if (minorOpen) {
+          const items = document.createElement("div");
+          items.className = "ssub-items";
+          let html = "";
+          for (const r of bucket.items) {
+            const p = cellFromRange(range, planCol, r.row);
+            const a = cellFromRange(range, actualCol, r.row);
+            const d = fmtDiff(p, a, isIncome);
+            const ip = pctInfo(p, a, isIncome);
+            html += `
+              <div class="sitem">
+                <div class="sitem-top">
+                  <span class="sitem-name">${r.detail}</span>
+                  <span class="spct sm ${ip.cls}">${ip.text}</span>
+                </div>
+                ${barHTML(p, a, isIncome)}
+                <div class="sitem-foot">
+                  <span class="sfig"><b>${fmtWon(a)}</b> <i>/ ${fmtWon(p)}</i></span>
+                  <span class="sdiff sm ${d.cls}">${d.text}</span>
+                </div>
+              </div>
+            `;
+          }
+          items.innerHTML = html;
+          sub.appendChild(items);
+        }
+
         detail.appendChild(sub);
       }
 

@@ -391,50 +391,87 @@ button[type="submit"]:disabled { opacity: 0.45; cursor: default; }
   text-align: center;
 }
 
-/* 펼친 세부 영역 — 배경을 낮춰 계층을 만듭니다 */
+/* 펼친 세부 영역 — 배경을 올려 계층을 만듭니다 */
 .sgroup-detail {
   background: var(--card);
-  padding: 4px 14px 14px;
+  padding: 6px 12px 12px;
 }
 
-.ssub { padding-top: 14px; }
+/* 1단계: 소분류 */
+.ssub { margin-top: 8px; }
+.ssub:first-child { margin-top: 4px; }
 
 .ssub-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.88rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  width: 100%;
+  display: block;
+  padding: 13px 13px 12px;
+  border: none;
+  border-radius: 12px;
+  background: var(--sunken);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
   color: var(--text);
-  margin-bottom: 4px;
 }
 
-.ssub-tag {
-  font-size: 0.62rem;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  letter-spacing: 0;
+.ssub.is-open .ssub-head { border-radius: 12px 12px 0 0; }
+
+.ssub-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
 }
 
-/* 세부항목은 왼쪽 레일로 소속을 표시 */
+.ssub-name { font-size: 0.92rem; font-weight: 700; letter-spacing: -0.02em; }
+.ssub-right { display: flex; align-items: center; gap: 7px; }
+.ssub-caret { font-size: 0.6rem; color: var(--muted); }
+
+.ssub-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.ssub-foot .sfig { font-size: 0.82rem; }
+.ssub-foot .sfig b { font-size: 0.87rem; }
+
+/* 2단계: 세부항목 — 소분류 카드에 이어 붙고 레일로 소속을 표시 */
 .ssub-items {
-  border-left: 2px solid var(--line);
-  padding-left: 14px;
-  margin-left: 4px;
+  background: var(--sunken);
+  border-radius: 0 0 12px 12px;
+  padding: 2px 14px 12px 12px;
 }
 
-.sitem { padding: 12px 0 13px; border-bottom: 1px solid var(--line); }
+/* 소분류가 없는 그룹(소득 등)은 세부항목 블록이 단독 카드가 됩니다 */
+.ssub:not(:has(.ssub-head)) .ssub-items { border-radius: 12px; padding-top: 6px; }
+
+.ssub-items::before {
+  content: "세부항목";
+  display: block;
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 8px 0 2px 12px;
+  letter-spacing: 0.02em;
+}
+
+.sitem {
+  padding: 11px 0 12px 12px;
+  border-left: 2px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
 .sitem:last-child { border-bottom: none; padding-bottom: 4px; }
 
 .sitem-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-.sitem-name { font-size: 0.86rem; font-weight: 600; color: var(--text-2); letter-spacing: -0.015em; }
+.sitem-name { font-size: 0.85rem; font-weight: 600; color: var(--text-2); letter-spacing: -0.015em; }
 .sitem-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 8px; }
-.sitem .sfig { font-size: 0.8rem; }
-.sitem .sfig b { font-size: 0.85rem; }
+.sitem .sfig { font-size: 0.78rem; }
+.sitem .sfig b { font-size: 0.83rem; }
 
 /* 합계 카드는 강조 */
 .stotal { background: var(--card) !important; box-shadow: inset 0 0 0 2px var(--accent); }
