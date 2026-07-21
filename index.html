@@ -14,58 +14,84 @@
 <body>
 <div class="app">
   <header class="topbar">
-    <h1>가계부 지출 입력</h1>
+    <h1>가계부</h1>
     <div id="authArea"></div>
   </header>
 
   <main id="mainArea" hidden>
-    <form id="entryForm" class="card">
-      <p id="editBanner" class="edit-banner" hidden></p>
+    <nav class="tabs" id="tabs">
+      <button type="button" class="tab-btn is-active" data-tab="entry">입력 · 내역</button>
+      <button type="button" class="tab-btn" data-tab="summary">계획 대비 실적</button>
+    </nav>
 
-      <div class="field">
-        <label for="date">날짜</label>
-        <input type="date" id="date" required>
-      </div>
+    <div id="tab-entry" class="tab-panel">
+      <form id="entryForm" class="card">
+        <p id="editBanner" class="edit-banner" hidden></p>
 
-      <div class="field">
-        <label for="major">대분류</label>
-        <select id="major" required></select>
-      </div>
+        <div class="field">
+          <label for="date">날짜</label>
+          <input type="date" id="date" required>
+        </div>
 
-      <div class="field">
-        <label for="minor">소분류</label>
-        <select id="minor" required></select>
-      </div>
+        <div class="field">
+          <label for="major">대분류</label>
+          <select id="major" required></select>
+        </div>
 
-      <div class="field">
-        <label for="detail">세부항목</label>
-        <select id="detail" required></select>
-      </div>
+        <div class="field">
+          <label for="minor">소분류</label>
+          <select id="minor" required></select>
+        </div>
 
-      <div class="field">
-        <label for="memo">상세 (메모)</label>
-        <input type="text" id="memo" placeholder="예: 이마트 장보기">
-      </div>
+        <div class="field">
+          <label for="detail">세부항목</label>
+          <select id="detail" required></select>
+        </div>
 
-      <div class="field">
-        <label for="amount">이용금액 (원)</label>
-        <input type="number" id="amount" inputmode="numeric" min="0" step="1" required placeholder="예: 15000">
-      </div>
+        <div class="field">
+          <label for="memo">상세 (메모)</label>
+          <input type="text" id="memo" placeholder="예: 이마트 장보기">
+        </div>
 
-      <button type="submit" id="submitBtn">입력</button>
-      <button type="button" id="cancelEditBtn" class="secondary-btn" hidden>수정 취소</button>
-      <p id="statusMsg" class="status" role="status"></p>
-    </form>
+        <div class="field">
+          <label for="amount">이용금액 (원)</label>
+          <input type="number" id="amount" inputmode="numeric" min="0" step="1" required placeholder="예: 15000">
+        </div>
 
-    <section class="card recent">
-      <div class="recent-header">
-        <h2>입력 내역</h2>
-        <button type="button" id="refreshBtn" class="linklike">새로고침</button>
-      </div>
-      <ul id="recentList" class="recent-list"></ul>
-      <button type="button" id="moreBtn" class="secondary-btn more-btn" hidden>더 보기</button>
-      <p id="listMeta" class="list-meta" role="status"></p>
-    </section>
+        <button type="submit" id="submitBtn">입력</button>
+        <button type="button" id="cancelEditBtn" class="secondary-btn" hidden>수정 취소</button>
+        <p id="statusMsg" class="status" role="status"></p>
+      </form>
+
+      <section class="card recent">
+        <div class="recent-header">
+          <h2>입력 내역</h2>
+          <button type="button" id="refreshBtn" class="linklike">새로고침</button>
+        </div>
+        <ul id="recentList" class="recent-list"></ul>
+        <button type="button" id="moreBtn" class="secondary-btn more-btn" hidden>더 보기</button>
+        <p id="listMeta" class="list-meta" role="status"></p>
+      </section>
+    </div>
+
+    <div id="tab-summary" class="tab-panel" hidden>
+      <section class="card summary">
+        <div class="summary-controls">
+          <select id="summaryMode">
+            <option value="month">월별</option>
+            <option value="year">연도 합계</option>
+          </select>
+          <select id="summaryYear"></select>
+          <select id="summaryMonth"></select>
+          <button type="button" id="summaryRefreshBtn" class="linklike">새로고침</button>
+        </div>
+
+        <div id="summaryNet" class="summary-net"></div>
+        <div id="summaryBody" class="summary-body">
+          <p class="muted">불러오는 중...</p>
+        </div>
+      </section>
+    </div>
   </main>
 
   <section id="loginArea" class="card login-card">

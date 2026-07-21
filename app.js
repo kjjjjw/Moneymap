@@ -433,6 +433,237 @@ async function handleDelete(row) {
   }
 }
 
+// ── 계획 대비 실적 ─────────────────────────────────────────
+let summaryYear = null;
+let summaryMonth = null;
+let summaryMode = "month";
+let expandedMajors = new Set();
+
+function summarySheetPath() {
+  return `/me/drive/items/${cachedFileId()}/workbook/worksheets/${encodeURIComponent(APP_CONFIG.summarySheet)}`;
+}
+
+function cachedFileId() {
+  return localStorage.getItem("gagyebu_fileId");
+}
+
+function monthKey(year, month) {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function columnsFor(mode, year, month) {
+  if (mode === "year") return YEAR_COLUMNS[String(year)] || null;
+  return MONTH_COLUMNS[monthKey(year, month)] || null;
+}
+
+function colIndex(letters) {
+  let n = 0;
+  for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+
+function colOffset(fromCol, toCol) {
+  return colIndex(toCol) - colIndex(fromCol);
+}
+
+// 시트에서 필요한 셀만 하나의 range 주소로 모아 한 번에 읽습니다.
+async function fetchSummaryRange(cols, rows) {
+  const [planCol, actualCol] = cols;
+  const minRow = Math.min(...rows);
+  const maxRow = Math.max(...rows);
+  const address = `${planCol}${minRow}:${actualCol}${maxRow}`;
+  const data = await graphFetch(
+    `${summarySheetPath()}/range(address='${address}')?$select=values`
+  );
+  return { values: data.values, minRow, planCol };
+}
+
+function cellFromRange(range, targetCol, targetRow) {
+  const rowOffset = targetRow - range.minRow;
+  const colOff = colOffset(range.planCol, targetCol);
+  const line = range.values[rowOffset];
+  return line ? line[colOff] : null;
+}
+
+function fmtWon(n) {
+  const v = Number(n || 0);
+  return v.toLocaleString("ko-KR") + "원";
+}
+
+// isIncome=true(소득/저축투자): 실적이 계획보다 많을수록 좋음(초록)
+// isIncome=false(지출): 실적이 계획보다 적을수록 좋음(초록) - 시트의 "차이" 정의와 동일
+function fmtDiff(planVal, actualVal, isIncome) {
+  const plan = Number(planVal || 0);
+  const actual = Number(actualVal || 0);
+  const diff = isIncome ? (actual - plan) : (plan - actual);
+  if (diff === 0) return { text: "±0", cls: "" };
+  const sign = diff > 0 ? "+" : "";
+  return { text: `${sign}${diff.toLocaleString("ko-KR")}원`, cls: diff > 0 ? "under" : "over" };
+}
+
+function populateSummarySelectors() {
+  const yearSel = el("summaryYear");
+  const monthSel = el("summaryMonth");
+  const years = Object.keys(YEAR_COLUMNS);
+  yearSel.innerHTML = "";
+  for (const y of years) {
+    const opt = document.createElement("option");
+    opt.value = y;
+    opt.textContent = `${y}년`;
+    yearSel.appendChild(opt);
+  }
+
+  monthSel.innerHTML = "";
+  for (let m = 1; m <= 12; m++) {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = `${m}월`;
+    monthSel.appendChild(opt);
+  }
+
+  const now = new Date();
+  const curYear = String(now.getFullYear());
+  const curMonth = now.getMonth() + 1;
+  summaryYear = years.includes(curYear) ? curYear : years[0];
+  summaryMonth = MONTH_COLUMNS[monthKey(summaryYear, curMonth)] ? curMonth : 1;
+  yearSel.value = summaryYear;
+  monthSel.value = summaryMonth;
+  el("summaryMode").value = summaryMode;
+  syncSummaryModeUI();
+}
+
+function syncSummaryModeUI() {
+  el("summaryMonth").hidden = summaryMode === "year";
+}
+
+async function loadSummary() {
+  const body = el("summaryBody");
+  const netEl = el("summaryNet");
+  body.innerHTML = "<p class=\'muted\'>불러오는 중...</p>";
+  netEl.textContent = "";
+
+  const cols = columnsFor(summaryMode, summaryYear, summaryMonth);
+  if (!cols) {
+    body.innerHTML = "<p class=\'muted\'>이 시트에 없는 기간입니다 (2026.07~2028.12 범위만 있습니다).</p>";
+    return;
+  }
+
+  try {
+    await getFileId(); // fileId 캐시 보장
+    const allRows = SUMMARY_GROUPS.flatMap((g) => g.rows.map((r) => r.row).concat([g.totalRow]))
+      .concat([GRAND_TOTAL_ROW, NET_ROW, CUMULATIVE_ROW]);
+    const range = await fetchSummaryRange(cols, allRows);
+    renderSummary(range, cols);
+  } catch (e) {
+    body.innerHTML = `<p class=\'muted\'>불러오지 못했습니다: ${e.message}</p>`;
+  }
+}
+
+function renderSummary(range, cols) {
+  const [planCol, actualCol] = cols;
+  const body = el("summaryBody");
+  body.innerHTML = "";
+
+  for (const group of SUMMARY_GROUPS) {
+    const isIncome = group.major === "소득" || group.major === "저축·투자";
+    const plan = cellFromRange(range, planCol, group.totalRow);
+    const actual = cellFromRange(range, actualCol, group.totalRow);
+    const diff = fmtDiff(plan, actual, isIncome);
+
+    const wrap = document.createElement("div");
+    wrap.className = "sgroup";
+
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "sgroup-head";
+    const isOpen = expandedMajors.has(group.major);
+    head.setAttribute("aria-expanded", String(isOpen));
+    head.innerHTML = `
+      <span class="sgroup-name">${group.major}</span>
+      <span class="sgroup-nums">
+        <span class="splan">계획 ${fmtWon(plan)}</span>
+        <span class="sactual">실적 ${fmtWon(actual)}</span>
+        <span class="sdiff ${diff.cls}">${diff.text}</span>
+      </span>
+      <span class="sgroup-caret">${isOpen ? "▲" : "▼"}</span>
+    `;
+    head.addEventListener("click", () => {
+      if (expandedMajors.has(group.major)) expandedMajors.delete(group.major);
+      else expandedMajors.add(group.major);
+      renderSummary(range, cols);
+    });
+
+    wrap.appendChild(head);
+
+    if (isOpen) {
+      const detailList = document.createElement("div");
+      detailList.className = "sgroup-detail";
+      for (const r of group.rows) {
+        const p = cellFromRange(range, planCol, r.row);
+        const a = cellFromRange(range, actualCol, r.row);
+        const d = fmtDiff(p, a, isIncome);
+        const line = document.createElement("div");
+        line.className = "sline";
+        const label = r.minor ? `${r.minor} · ${r.detail}` : r.detail;
+        line.innerHTML = `
+          <span class="sline-label">${label}</span>
+          <span class="sline-nums">
+            <span class="splan">${fmtWon(p)}</span>
+            <span class="sactual">${fmtWon(a)}</span>
+            <span class="sdiff ${d.cls}">${d.text}</span>
+          </span>
+        `;
+        detailList.appendChild(line);
+      }
+      wrap.appendChild(detailList);
+    }
+
+    body.appendChild(wrap);
+  }
+
+  const grandPlan = cellFromRange(range, planCol, GRAND_TOTAL_ROW);
+  const grandActual = cellFromRange(range, actualCol, GRAND_TOTAL_ROW);
+  const grandDiff = fmtDiff(grandPlan, grandActual, false);
+  const netPlan = cellFromRange(range, planCol, NET_ROW);
+  const netActual = cellFromRange(range, actualCol, NET_ROW);
+
+  const totalWrap = document.createElement("div");
+  totalWrap.className = "sgroup stotal";
+  totalWrap.innerHTML = `
+    <div class="sgroup-head is-static">
+      <span class="sgroup-name">지출 합계</span>
+      <span class="sgroup-nums">
+        <span class="splan">계획 ${fmtWon(grandPlan)}</span>
+        <span class="sactual">실적 ${fmtWon(grandActual)}</span>
+        <span class="sdiff ${grandDiff.cls}">${grandDiff.text}</span>
+      </span>
+    </div>
+  `;
+  body.appendChild(totalWrap);
+
+  const netEl = el("summaryNet");
+  const netActualNum = Number(netActual || 0);
+  netEl.className = "summary-net " + (netActualNum >= 0 ? "positive" : "negative");
+  netEl.innerHTML = `
+    <span class="net-label">월 수지 (실적)</span>
+    <span class="net-value">${fmtWon(netActual)}</span>
+    <span class="net-plan">계획 ${fmtWon(netPlan)}</span>
+  `;
+}
+
+function switchTab(name) {
+  const isEntry = name === "entry";
+  el("tab-entry").hidden = !isEntry;
+  el("tab-summary").hidden = isEntry;
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.tab === name);
+  });
+  if (name === "summary") {
+    if (!summaryYear) populateSummarySelectors();
+    loadSummary();
+  }
+}
+
 // ── 로그인 상태 ────────────────────────────────────────────
 function showApp() {
   el("loginArea").hidden = true;
@@ -462,6 +693,24 @@ async function init() {
   el("refreshBtn").addEventListener("click", () => loadRows(true));
   el("moreBtn").addEventListener("click", () => loadRows(false));
   el("loginBtn").addEventListener("click", () => msalInstance.loginRedirect({ scopes: GRAPH_SCOPES }));
+
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+  el("summaryMode").addEventListener("change", (e) => {
+    summaryMode = e.target.value;
+    syncSummaryModeUI();
+    loadSummary();
+  });
+  el("summaryYear").addEventListener("change", (e) => {
+    summaryYear = e.target.value;
+    loadSummary();
+  });
+  el("summaryMonth").addEventListener("change", (e) => {
+    summaryMonth = Number(e.target.value);
+    loadSummary();
+  });
+  el("summaryRefreshBtn").addEventListener("click", () => loadSummary());
 
   try {
     await msalInstance.initialize();
