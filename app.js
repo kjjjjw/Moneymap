@@ -564,6 +564,27 @@ function renderSummary(range, cols) {
   const body = el("summaryBody");
   body.innerHTML = "";
 
+  // 막대는 "계획" 기준 트랙 위에 실적을 채웁니다.
+  // 실적이 계획을 넘으면 트랙 밖으로 오버플로우 세그먼트가 삐져나옵니다.
+  function barHTML(plan, actual, isIncome) {
+    const p = Number(plan || 0);
+    const a = Number(actual || 0);
+    const base = Math.max(p, 1); // 0으로 나누기 방지
+    const fillPct = Math.min(100, (a / base) * 100);
+    const overPct = a > p ? Math.min(100, ((a - p) / base) * 100) : 0;
+    const isOver = a > p;
+    // 지출: 넘치면 나쁨(빨강). 소득/저축: 못 채우면 나쁨(옅게), 넘치면 좋음(그대로 채움)
+    const fillClass = isIncome ? "sbar-fill-income" : (isOver ? "sbar-fill-over" : "sbar-fill");
+    return `
+      <div class="sbar" role="img" aria-label="계획 ${fmtWon(p)} 중 실적 ${fmtWon(a)}">
+        <div class="sbar-track">
+          <div class="${fillClass}" style="width:${fillPct}%"></div>
+          ${overPct > 0 ? `<div class="sbar-over" style="width:${overPct}%"></div>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
   for (const group of SUMMARY_GROUPS) {
     const isIncome = group.major === "소득" || group.major === "저축·투자";
     const plan = cellFromRange(range, planCol, group.totalRow);
@@ -579,13 +600,16 @@ function renderSummary(range, cols) {
     const isOpen = expandedMajors.has(group.major);
     head.setAttribute("aria-expanded", String(isOpen));
     head.innerHTML = `
-      <span class="sgroup-name">${group.major}</span>
-      <span class="sgroup-nums">
-        <span class="splan">계획 ${fmtWon(plan)}</span>
-        <span class="sactual">실적 ${fmtWon(actual)}</span>
+      <div class="sgroup-toprow">
+        <span class="sgroup-name">${group.major}</span>
+        <span class="sgroup-caret">${isOpen ? "접기 ▲" : "펼치기 ▼"}</span>
+      </div>
+      ${barHTML(plan, actual, isIncome)}
+      <div class="sgroup-nums">
+        <span class="snum-block"><em>계획</em>${fmtWon(plan)}</span>
+        <span class="snum-block"><em>실적</em>${fmtWon(actual)}</span>
         <span class="sdiff ${diff.cls}">${diff.text}</span>
-      </span>
-      <span class="sgroup-caret">${isOpen ? "▲" : "▼"}</span>
+      </div>
     `;
     head.addEventListener("click", () => {
       if (expandedMajors.has(group.major)) expandedMajors.delete(group.major);
@@ -606,12 +630,15 @@ function renderSummary(range, cols) {
         line.className = "sline";
         const label = r.minor ? `${r.minor} · ${r.detail}` : r.detail;
         line.innerHTML = `
-          <span class="sline-label">${label}</span>
-          <span class="sline-nums">
-            <span class="splan">${fmtWon(p)}</span>
-            <span class="sactual">${fmtWon(a)}</span>
+          <div class="sline-toprow">
+            <span class="sline-label">${label}</span>
             <span class="sdiff ${d.cls}">${d.text}</span>
-          </span>
+          </div>
+          ${barHTML(p, a, isIncome)}
+          <div class="sline-nums">
+            <span>계획 ${fmtWon(p)}</span>
+            <span>실적 ${fmtWon(a)}</span>
+          </div>
         `;
         detailList.appendChild(line);
       }
@@ -631,12 +658,15 @@ function renderSummary(range, cols) {
   totalWrap.className = "sgroup stotal";
   totalWrap.innerHTML = `
     <div class="sgroup-head is-static">
-      <span class="sgroup-name">지출 합계</span>
-      <span class="sgroup-nums">
-        <span class="splan">계획 ${fmtWon(grandPlan)}</span>
-        <span class="sactual">실적 ${fmtWon(grandActual)}</span>
+      <div class="sgroup-toprow">
+        <span class="sgroup-name">지출 합계</span>
+      </div>
+      ${barHTML(grandPlan, grandActual, false)}
+      <div class="sgroup-nums">
+        <span class="snum-block"><em>계획</em>${fmtWon(grandPlan)}</span>
+        <span class="snum-block"><em>실적</em>${fmtWon(grandActual)}</span>
         <span class="sdiff ${grandDiff.cls}">${grandDiff.text}</span>
-      </span>
+      </div>
     </div>
   `;
   body.appendChild(totalWrap);

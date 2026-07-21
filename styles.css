@@ -8,6 +8,7 @@
   --accent-text: #ffffff;
   --success: #16a34a;
   --error: #dc2626;
+  --track: #e7e5f0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +22,7 @@
     --accent-text: #ffffff;
     --success: #4ade80;
     --error: #f87171;
+    --track: #33304a;
   }
 }
 
@@ -266,12 +268,14 @@ select:focus-visible {
   flex: 1;
   padding: 10px;
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
+  font-family: inherit;
   border: none;
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .tab-btn.is-active {
@@ -292,8 +296,9 @@ select:focus-visible {
   width: auto;
   flex: 1 1 auto;
   min-width: 84px;
-  font-size: 0.9rem;
-  padding: 8px 10px;
+  font-size: 0.88rem;
+  padding: 9px 10px;
+  font-weight: 500;
 }
 
 .summary-controls .linklike {
@@ -301,53 +306,55 @@ select:focus-visible {
   flex: 0 0 auto;
 }
 
+/* 월 수지 히어로 — 이 화면에서 가장 중요한 숫자 하나 */
 .summary-net {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  padding: 14px 16px;
-  border-radius: 10px;
-  margin-bottom: 16px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  flex-direction: column;
+  gap: 2px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  margin-bottom: 18px;
+  background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 78%, #000) 100%);
+  color: #fff;
 }
 
 .summary-net .net-label {
-  font-size: 0.85rem;
-  color: var(--muted);
-  flex-basis: 100%;
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.75;
+  letter-spacing: 0.02em;
 }
 
 .summary-net .net-value {
-  font-size: 1.4rem;
-  font-weight: 700;
+  font-size: 2rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
-.summary-net.positive .net-value { color: var(--success); }
-.summary-net.negative .net-value { color: var(--error); }
+.summary-net.negative .net-value { color: #ffd4d4; }
 
 .summary-net .net-plan {
   font-size: 0.8rem;
-  color: var(--muted);
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
 }
 
-.summary-body { display: flex; flex-direction: column; gap: 8px; }
+.summary-body { display: flex; flex-direction: column; gap: 10px; }
 
 .sgroup {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
+  background: var(--card-bg);
 }
 
 .sgroup-head {
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: var(--card-bg);
+  display: block;
+  padding: 14px 16px 12px;
+  background: transparent;
   border: none;
   cursor: pointer;
   text-align: left;
@@ -357,60 +364,124 @@ select:focus-visible {
 
 .sgroup-head.is-static { cursor: default; }
 
-.sgroup-name {
-  font-weight: 600;
-  font-size: 0.92rem;
-  flex: 0 0 auto;
-  min-width: 64px;
+.sgroup-toprow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
 }
 
-.sgroup-nums {
-  flex: 1;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 0.78rem;
-  justify-content: flex-end;
+.sgroup-name {
+  font-weight: 700;
+  font-size: 0.98rem;
 }
 
 .sgroup-caret {
-  flex: 0 0 auto;
-  font-size: 0.7rem;
-  color: var(--muted);
+  font-size: 0.72rem;
+  color: var(--accent);
+  font-weight: 600;
 }
 
-.splan, .sactual { color: var(--muted); white-space: nowrap; }
-.sdiff { font-weight: 600; white-space: nowrap; }
+/* ── 막대: 계획 트랙 위에 실적을 채우는 시그니처 요소 ─────── */
+.sbar-track {
+  position: relative;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--track, color-mix(in srgb, var(--muted) 22%, transparent));
+  overflow: visible;
+  display: flex;
+}
+
+.sbar-fill,
+.sbar-fill-over,
+.sbar-fill-income {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sbar-fill { background: var(--accent); }
+.sbar-fill-over { background: var(--accent); border-radius: 6px 0 0 6px; }
+.sbar-fill-income { background: var(--success); }
+
+.sbar-over {
+  height: 100%;
+  margin-left: 2px;
+  border-radius: 6px;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--error),
+    var(--error) 4px,
+    color-mix(in srgb, var(--error) 70%, transparent) 4px,
+    color-mix(in srgb, var(--error) 70%, transparent) 8px
+  );
+}
+
+.sgroup-nums {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-top: 9px;
+  flex-wrap: wrap;
+}
+
+.snum-block {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.snum-block em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-right: 4px;
+}
+
+.sdiff {
+  font-weight: 700;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
 .sdiff.under { color: var(--success); }
 .sdiff.over { color: var(--error); }
 
 .sgroup-detail {
   border-top: 1px solid var(--border);
-  padding: 4px 14px;
+  padding: 4px 16px 10px;
+  background: color-mix(in srgb, var(--accent) 3%, transparent);
 }
 
 .sline {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  padding: 9px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 0.82rem;
-  flex-wrap: wrap;
 }
 
 .sline:last-child { border-bottom: none; }
 
-.sline-label { color: var(--text); flex: 1 1 auto; min-width: 120px; }
+.sline-toprow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.sline-label {
+  font-size: 0.85rem;
+  color: var(--text);
+}
 
 .sline-nums {
   display: flex;
-  gap: 10px;
-  font-size: 0.76rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 7px;
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
-.stotal .sgroup-head { background: color-mix(in srgb, var(--accent) 6%, var(--card-bg)); }
-.stotal .sgroup-name { font-weight: 700; }
+.stotal { border-color: var(--accent); border-width: 1.5px; }
+.stotal .sgroup-name { font-size: 1.02rem; }
