@@ -1,4 +1,4 @@
-const CACHE_NAME = "gagyebu-shell-v6";
+const CACHE_NAME = "gagyebu-shell-v9";
 const SHELL_FILES = [
   "index.html",
   "styles.css",

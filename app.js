@@ -91,21 +91,101 @@ function fillSelect(sel, items, selected) {
   if (selected) sel.value = selected;
 }
 
+// ── 입력 모드: 지출 / 소득 ──────────────────────────────────
+// 지출은 기존 CATEGORY_TREE(하드코딩)를 그대로 쓰고,
+// 소득은 가계부_월별 시트에서 자동 인식한 구조(getStructure)를 그대로 재사용합니다.
+// 그래서 시트에 소득/저축 항목이 추가돼도 카테고리 목록이 저절로 따라옵니다.
+let entryMode = "expense"; // "expense" | "income"
+let incomeCategoryTree = null; // { 대분류: { 소분류(""면 무분류): [세부항목...] } }
+const INCOME_MAJORS = ["소득", "저축·투자"];
+const NO_MINOR = ""; // 소분류가 없는 항목(예: 소득)의 자리표시 키
+
+function buildIncomeTree(st) {
+  const tree = {};
+  for (const g of st.groups) {
+    if (!INCOME_MAJORS.includes(g.major)) continue;
+    const minors = {};
+    for (const r of g.rows) {
+      const key = r.minor || NO_MINOR;
+      if (!minors[key]) minors[key] = [];
+      minors[key].push(r.detail);
+    }
+    tree[g.major] = minors;
+  }
+  return tree;
+}
+
+function currentCategoryTree() {
+  return entryMode === "income" ? (incomeCategoryTree || {}) : CATEGORY_TREE;
+}
+
+function currentTableName() {
+  return entryMode === "income" ? APP_CONFIG.incomeTableName : APP_CONFIG.tableName;
+}
+
+// 소분류가 전부 무분류(NO_MINOR)인 대분류는 소분류 선택을 건너뜁니다 (예: 소득).
+function minorFieldNeeded(tree, major) {
+  const minors = Object.keys(tree[major] || {});
+  return !(minors.length === 1 && minors[0] === NO_MINOR);
+}
+
 function populateMajor(major, minor, detail) {
-  fillSelect(el("major"), Object.keys(CATEGORY_TREE), major);
+  const tree = currentCategoryTree();
+  fillSelect(el("major"), Object.keys(tree), major);
   populateMinor(minor, detail);
 }
 
 function populateMinor(minor, detail) {
+  const tree = currentCategoryTree();
   const major = el("major").value;
-  fillSelect(el("minor"), Object.keys(CATEGORY_TREE[major] || {}), minor);
+  const needsMinor = minorFieldNeeded(tree, major);
+  el("minorField").hidden = !needsMinor;
+  // 숨긴 소분류는 required를 풀어야 폼 검증(required)에 걸리지 않습니다.
+  el("minor").required = needsMinor;
+  if (needsMinor) {
+    fillSelect(el("minor"), Object.keys(tree[major] || {}), minor);
+  } else {
+    fillSelect(el("minor"), [NO_MINOR], NO_MINOR);
+  }
   populateDetail(detail);
 }
 
 function populateDetail(detail) {
+  const tree = currentCategoryTree();
   const major = el("major").value;
   const minor = el("minor").value;
-  fillSelect(el("detail"), (CATEGORY_TREE[major] || {})[minor] || [], detail);
+  fillSelect(el("detail"), (tree[major] || {})[minor] || [], detail);
+}
+
+async function ensureIncomeTree() {
+  if (incomeCategoryTree) return incomeCategoryTree;
+  const st = await getStructure();
+  incomeCategoryTree = buildIncomeTree(st);
+  return incomeCategoryTree;
+}
+
+async function setEntryMode(mode) {
+  if (mode === entryMode) return;
+  if (mode === "income") {
+    showStatus("소득 분류를 불러오는 중...", false);
+    try {
+      await ensureIncomeTree();
+    } catch (e) {
+      showStatus("소득 분류를 불러오지 못했습니다: " + e.message, true);
+      return;
+    }
+  }
+  entryMode = mode;
+  cancelEdit(); // 모드를 바꾸면 진행 중이던 수정은 취소합니다.
+  document.querySelectorAll(".mode-btn").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.mode === mode);
+  });
+  el("amountLabel").textContent = mode === "income" ? "입금액 (원)" : "이용금액 (원)";
+  el("submitBtn").textContent = "입력";
+  el("recentTitle").textContent = mode === "income" ? "소득 · 저축 내역" : "지출 내역";
+  populateMajor();
+  showStatus("", false);
+  await loadRows(true);
 }
 
 function showStatus(msg, isError) {
@@ -173,13 +253,13 @@ async function getFileId() {
   return match.id;
 }
 
-function tablePath(fileId) {
-  return `/me/drive/items/${fileId}/workbook/tables/${encodeURIComponent(APP_CONFIG.tableName)}`;
+function tablePath(fileId, tableName) {
+  return `/me/drive/items/${fileId}/workbook/tables/${encodeURIComponent(tableName)}`;
 }
 
-function rowPath(fileId, index) {
+function rowPath(fileId, tableName, index) {
   // /rows/{index} 형식은 ApiNotFound가 나는 경우가 있어 ItemAt을 씁니다.
-  return `${tablePath(fileId)}/rows/$/ItemAt(index=${index})`;
+  return `${tablePath(fileId, tableName)}/rows/$/ItemAt(index=${index})`;
 }
 
 async function recalc(fileId) {
@@ -193,21 +273,21 @@ async function recalc(fileId) {
   }
 }
 
-async function getRowCount(fileId) {
+async function getRowCount(fileId, tableName) {
   try {
-    const range = await graphFetch(`${tablePath(fileId)}/dataBodyRange?$select=rowCount`);
+    const range = await graphFetch(`${tablePath(fileId, tableName)}/dataBodyRange?$select=rowCount`);
     if (range && typeof range.rowCount === "number") return range.rowCount;
   } catch (e) {
     // 아래 폴백으로 진행
   }
-  const all = await graphFetch(`${tablePath(fileId)}/rows?$select=index`);
+  const all = await graphFetch(`${tablePath(fileId, tableName)}/rows?$select=index`);
   return (all.value || []).length;
 }
 
 // ── 쓰기 ───────────────────────────────────────────────────
-async function addRow(values) {
+async function addRow(tableName, values) {
   const fileId = await getFileId();
-  await graphFetch(`${tablePath(fileId)}/rows/add`, {
+  await graphFetch(`${tablePath(fileId, tableName)}/rows/add`, {
     method: "POST",
     body: JSON.stringify({ values: [values] })
   });
@@ -216,28 +296,28 @@ async function addRow(values) {
 
 // 목록을 불러온 뒤 다른 곳에서 행이 지워지면 index가 밀립니다.
 // 쓰기 직전에 그 행만 다시 읽어 값이 그대로인지 확인합니다.
-async function assertRowUnchanged(fileId, index, expected) {
-  const row = await graphFetch(rowPath(fileId, index));
+async function assertRowUnchanged(fileId, tableName, index, expected) {
+  const row = await graphFetch(rowPath(fileId, tableName, index));
   const actual = (row && row.values && row.values[0]) || null;
   if (!sameRow(expected, actual)) {
     throw new Error("이 내역이 다른 곳에서 바뀌었습니다. 새로고침한 뒤 다시 시도하세요.");
   }
 }
 
-async function updateRow(index, original, values) {
+async function updateRow(tableName, index, original, values) {
   const fileId = await getFileId();
-  await assertRowUnchanged(fileId, index, original);
-  await graphFetch(rowPath(fileId, index), {
+  await assertRowUnchanged(fileId, tableName, index, original);
+  await graphFetch(rowPath(fileId, tableName, index), {
     method: "PATCH",
     body: JSON.stringify({ values: [values] })
   });
   await recalc(fileId);
 }
 
-async function deleteRow(index, original) {
+async function deleteRow(tableName, index, original) {
   const fileId = await getFileId();
-  await assertRowUnchanged(fileId, index, original);
-  await graphFetch(rowPath(fileId, index), { method: "DELETE" });
+  await assertRowUnchanged(fileId, tableName, index, original);
+  await graphFetch(rowPath(fileId, tableName, index), { method: "DELETE" });
   await recalc(fileId);
 }
 
@@ -249,13 +329,14 @@ async function loadRows(reset) {
   const moreBtn = el("moreBtn");
   moreBtn.disabled = true;
 
+  const tableName = currentTableName();
   try {
     const fileId = await getFileId();
     if (reset) {
       loadedRows = [];
       list.innerHTML = "<li class='muted'>불러오는 중...</li>";
       el("listMeta").textContent = "";
-      totalRows = await getRowCount(fileId);
+      totalRows = await getRowCount(fileId, tableName);
     } else {
       moreBtn.textContent = "불러오는 중...";
     }
@@ -264,7 +345,7 @@ async function loadRows(reset) {
     if (remaining > 0) {
       const top = Math.min(PAGE_SIZE, remaining);
       const skip = remaining - top;
-      const data = await graphFetch(`${tablePath(fileId)}/rows?$top=${top}&$skip=${skip}`);
+      const data = await graphFetch(`${tablePath(fileId, tableName)}/rows?$top=${top}&$skip=${skip}`);
       const batch = (data.value || []).map((r, i) => ({
         index: typeof r.index === "number" ? r.index : skip + i,
         values: (r.values && r.values[0]) || []
@@ -287,7 +368,8 @@ function renderRows() {
   list.innerHTML = "";
 
   if (loadedRows.length === 0) {
-    list.innerHTML = "<li class='muted'>아직 입력한 내역이 없습니다. 위에서 첫 지출을 남겨보세요.</li>";
+    const what = entryMode === "income" ? "소득·저축 내역이" : "지출 내역이";
+    list.innerHTML = `<li class='muted'>아직 입력한 ${what} 없습니다. 위에서 첫 항목을 남겨보세요.</li>`;
   }
 
   for (const row of loadedRows) {
@@ -397,14 +479,15 @@ async function handleSubmit(e) {
   const editing = editingIndex !== null;
   showStatus(editing ? "수정하는 중..." : "저장하는 중...", false);
 
+  const tableName = currentTableName();
   try {
     const values = formValues();
     if (editing) {
-      await updateRow(editingIndex, editingOriginal, values);
+      await updateRow(tableName, editingIndex, editingOriginal, values);
       cancelEdit();
       showStatus("수정했습니다.", false);
     } else {
-      await addRow(values);
+      await addRow(tableName, values);
       showStatus("저장했습니다.", false);
       el("amount").value = "";
       el("memo").value = "";
@@ -424,7 +507,7 @@ async function handleDelete(row) {
 
   showStatus("삭제하는 중...", false);
   try {
-    await deleteRow(row.index, row.values);
+    await deleteRow(currentTableName(), row.index, row.values);
     if (editingIndex === row.index) cancelEdit();
     showStatus("삭제했습니다.", false);
     await loadRows(true); // 삭제하면 뒤쪽 행 index가 밀리므로 전체를 다시 읽습니다
@@ -452,9 +535,143 @@ function monthKey(year, month) {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
 
-function columnsFor(mode, year, month) {
-  if (mode === "year") return YEAR_COLUMNS[String(year)] || null;
-  return MONTH_COLUMNS[monthKey(year, month)] || null;
+// ── 시트 구조 자동 인식 ────────────────────────────────────
+// 행/열 위치를 하드코딩하지 않고 시트에서 직접 읽습니다.
+// 시트에 행이나 월이 추가돼도 앱이 알아서 따라갑니다.
+let sheetStructure = null;
+
+function numToCol(n) {
+  let s = "";
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+function cellText(v) {
+  return String(v ?? "").trim();
+}
+
+// A~C열을 훑어 대분류/소분류/세부항목과 소계 행 위치를 알아냅니다.
+// 규칙: C열(세부항목)이 있으면 항목 행, A열만 있고 C열이 비면 소계/합계 행.
+function parseRowStructure(values) {
+  const groups = [];
+  let current = null;
+  let lastMinor = "";
+  let grandTotalRow = null;
+  let netRow = null;
+  let cumulativeRow = null;
+
+  for (let i = 0; i < values.length; i++) {
+    const rowNum = i + 1;
+    const a = cellText(values[i][0]);
+    const b = cellText(values[i][1]);
+    const c = cellText(values[i][2]);
+
+    if (a === "대분류" || (a === "" && b === "" && c === "")) continue;
+
+    if (c) {
+      if (a) {
+        current = { major: a, totalRow: null, rows: [] };
+        groups.push(current);
+        lastMinor = "";
+      }
+      if (!current) continue;
+      if (b) lastMinor = b;
+      current.rows.push({ row: rowNum, minor: lastMinor, detail: c });
+      continue;
+    }
+
+    if (a) {
+      if (current && current.totalRow === null) {
+        current.totalRow = rowNum;   // 방금 끝난 그룹의 소계
+        current = null;
+        continue;
+      }
+      // 그룹 밖의 총계 행들
+      if (a.includes("누적")) cumulativeRow = rowNum;
+      else if (a.includes("수지")) netRow = rowNum;
+      else if (a.includes("합계")) grandTotalRow = rowNum;
+    }
+  }
+
+  return {
+    groups: groups.filter((g) => g.totalRow && g.rows.length),
+    grandTotalRow,
+    netRow,
+    cumulativeRow
+  };
+}
+
+// 5행(월 라벨)과 6행(계획/실적/차이)을 읽어 연-월 → 열 매핑을 만듭니다.
+function parseColumnStructure(headerValues, startColNum) {
+  const monthCols = {};
+  const yearCols = {};
+  const labelRow = headerValues[0] || [];
+  const kindRow = headerValues[1] || [];
+  let pending = [];
+
+  for (let i = 0; i < kindRow.length; i++) {
+    const kind = cellText(kindRow[i]);
+    const label = cellText(labelRow[i]);
+    const colNum = startColNum + i;
+
+    if (kind !== "계획") continue;
+
+    const cols = [numToCol(colNum), numToCol(colNum + 1), numToCol(colNum + 2)];
+    const yearMatch = label.match(/(\d{4})\s*합계/);
+
+    if (yearMatch) {
+      const year = yearMatch[1];
+      yearCols[year] = cols;
+      for (const p of pending) monthCols[monthKey(year, p.month)] = p.cols;
+      pending = [];
+      continue;
+    }
+
+    const monthMatch = label.match(/(\d{1,2})\s*월/);
+    if (monthMatch) pending.push({ month: Number(monthMatch[1]), cols });
+  }
+
+  return { monthCols, yearCols };
+}
+
+async function getStructure() {
+  if (sheetStructure) return sheetStructure;
+  await getFileId();
+
+  const [labelRes, headerRes] = await Promise.all([
+    graphFetch(`${summarySheetPath()}/range(address='A1:C120')?$select=values`),
+    graphFetch(`${summarySheetPath()}/range(address='D5:EZ6')?$select=values`)
+  ]);
+
+  const rowPart = parseRowStructure(labelRes.values || []);
+  const colPart = parseColumnStructure(headerRes.values || [], 4); // D = 4번째 열
+
+  const ok = rowPart.groups.length > 0 && Object.keys(colPart.monthCols).length > 0;
+  if (!ok) {
+    // 시트 형식이 예상과 다르면 config.js의 값으로 되돌아갑니다.
+    sheetStructure = {
+      groups: SUMMARY_GROUPS,
+      grandTotalRow: GRAND_TOTAL_ROW,
+      netRow: NET_ROW,
+      cumulativeRow: CUMULATIVE_ROW,
+      monthCols: MONTH_COLUMNS,
+      yearCols: YEAR_COLUMNS,
+      fallback: true
+    };
+    return sheetStructure;
+  }
+
+  sheetStructure = { ...rowPart, ...colPart, fallback: false };
+  return sheetStructure;
+}
+
+function columnsFor(st, mode, year, month) {
+  if (mode === "year") return st.yearCols[String(year)] || null;
+  return st.monthCols[monthKey(year, month)] || null;
 }
 
 function colIndex(letters) {
@@ -502,10 +719,10 @@ function fmtDiff(planVal, actualVal, isIncome) {
   return { text: `${sign}${diff.toLocaleString("ko-KR")}원`, cls: diff > 0 ? "under" : "over" };
 }
 
-function populateSummarySelectors() {
+function populateSummarySelectors(st) {
   const yearSel = el("summaryYear");
   const monthSel = el("summaryMonth");
-  const years = Object.keys(YEAR_COLUMNS);
+  const years = Object.keys(st.yearCols).sort();
   yearSel.innerHTML = "";
   for (const y of years) {
     const opt = document.createElement("option");
@@ -526,11 +743,18 @@ function populateSummarySelectors() {
   const curYear = String(now.getFullYear());
   const curMonth = now.getMonth() + 1;
   summaryYear = years.includes(curYear) ? curYear : years[0];
-  summaryMonth = MONTH_COLUMNS[monthKey(summaryYear, curMonth)] ? curMonth : 1;
+  summaryMonth = st.monthCols[monthKey(summaryYear, curMonth)] ? curMonth : firstMonthOf(st, summaryYear);
   yearSel.value = summaryYear;
   monthSel.value = summaryMonth;
   el("summaryMode").value = summaryMode;
   syncSummaryModeUI();
+}
+
+function firstMonthOf(st, year) {
+  for (let m = 1; m <= 12; m++) {
+    if (st.monthCols[monthKey(year, m)]) return m;
+  }
+  return 1;
 }
 
 function syncSummaryModeUI() {
@@ -540,27 +764,36 @@ function syncSummaryModeUI() {
 async function loadSummary() {
   const body = el("summaryBody");
   const netEl = el("summaryNet");
-  body.innerHTML = "<p class=\'muted\'>불러오는 중...</p>";
+  body.innerHTML = "<p class='muted'>불러오는 중...</p>";
   netEl.textContent = "";
 
-  const cols = columnsFor(summaryMode, summaryYear, summaryMonth);
-  if (!cols) {
-    body.innerHTML = "<p class=\'muted\'>이 시트에 없는 기간입니다 (2026.07~2028.12 범위만 있습니다).</p>";
-    return;
-  }
-
   try {
-    await getFileId(); // fileId 캐시 보장
-    const allRows = SUMMARY_GROUPS.flatMap((g) => g.rows.map((r) => r.row).concat([g.totalRow]))
-      .concat([GRAND_TOTAL_ROW, NET_ROW, CUMULATIVE_ROW]);
+    const st = await getStructure();
+
+    const cols = columnsFor(st, summaryMode, summaryYear, summaryMonth);
+    if (!cols) {
+      body.innerHTML = "<p class='muted'>시트에 이 기간의 열이 없습니다. 다른 월이나 연도를 선택해주세요.</p>";
+      return;
+    }
+
+    const allRows = st.groups
+      .flatMap((g) => g.rows.map((r) => r.row).concat([g.totalRow]))
+      .concat([st.grandTotalRow, st.netRow, st.cumulativeRow].filter((r) => r));
     const range = await fetchSummaryRange(cols, allRows);
-    renderSummary(range, cols);
+    renderSummary(st, range, cols);
+
+    if (st.fallback) {
+      const warn = document.createElement("p");
+      warn.className = "sfallback";
+      warn.textContent = "시트 구조를 자동으로 읽지 못해 기본 설정값으로 표시하고 있습니다. 숫자가 어긋나면 시트 형식을 확인해주세요.";
+      body.prepend(warn);
+    }
   } catch (e) {
-    body.innerHTML = `<p class=\'muted\'>불러오지 못했습니다: ${e.message}</p>`;
+    body.innerHTML = `<p class='muted'>불러오지 못했습니다: ${e.message}</p>`;
   }
 }
 
-function renderSummary(range, cols) {
+function renderSummary(st, range, cols) {
   const [planCol, actualCol] = cols;
   const body = el("summaryBody");
   body.innerHTML = "";
@@ -595,7 +828,7 @@ function renderSummary(range, cols) {
     `;
   }
 
-  for (const group of SUMMARY_GROUPS) {
+  for (const group of st.groups) {
     const isIncome = group.major === "소득" || group.major === "저축·투자";
     const plan = cellFromRange(range, planCol, group.totalRow);
     const actual = cellFromRange(range, actualCol, group.totalRow);
@@ -632,7 +865,7 @@ function renderSummary(range, cols) {
       } else {
         expandedMajors.add(group.major);
       }
-      renderSummary(range, cols);
+      renderSummary(st, range, cols);
     });
 
     wrap.appendChild(head);
@@ -688,7 +921,7 @@ function renderSummary(range, cols) {
           subHead.addEventListener("click", () => {
             if (expandedMinors.has(minorKey)) expandedMinors.delete(minorKey);
             else expandedMinors.add(minorKey);
-            renderSummary(range, cols);
+            renderSummary(st, range, cols);
           });
           sub.appendChild(subHead);
         }
@@ -730,12 +963,12 @@ function renderSummary(range, cols) {
     body.appendChild(wrap);
   }
 
-  const grandPlan = cellFromRange(range, planCol, GRAND_TOTAL_ROW);
-  const grandActual = cellFromRange(range, actualCol, GRAND_TOTAL_ROW);
+  const grandPlan = cellFromRange(range, planCol, st.grandTotalRow);
+  const grandActual = cellFromRange(range, actualCol, st.grandTotalRow);
   const grandDiff = fmtDiff(grandPlan, grandActual, false);
   const grandPct = pctInfo(grandPlan, grandActual, false);
-  const netPlan = cellFromRange(range, planCol, NET_ROW);
-  const netActual = cellFromRange(range, actualCol, NET_ROW);
+  const netPlan = cellFromRange(range, planCol, st.netRow);
+  const netActual = cellFromRange(range, actualCol, st.netRow);
 
   const totalWrap = document.createElement("div");
   totalWrap.className = "sgroup stotal";
@@ -772,8 +1005,16 @@ function switchTab(name) {
     btn.classList.toggle("is-active", btn.dataset.tab === name);
   });
   if (name === "summary") {
-    if (!summaryYear) populateSummarySelectors();
-    loadSummary();
+    if (!summaryYear) {
+      getStructure()
+        .then((st) => {
+          populateSummarySelectors(st);
+          loadSummary();
+        })
+        .catch(() => loadSummary());
+    } else {
+      loadSummary();
+    }
   }
 }
 
@@ -807,6 +1048,10 @@ async function init() {
   el("moreBtn").addEventListener("click", () => loadRows(false));
   el("loginBtn").addEventListener("click", () => msalInstance.loginRedirect({ scopes: GRAPH_SCOPES }));
 
+  document.querySelectorAll(".mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setEntryMode(btn.dataset.mode));
+  });
+
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
@@ -823,7 +1068,15 @@ async function init() {
     summaryMonth = Number(e.target.value);
     loadSummary();
   });
-  el("summaryRefreshBtn").addEventListener("click", () => loadSummary());
+  el("summaryRefreshBtn").addEventListener("click", () => {
+    sheetStructure = null; // 시트 구조도 다시 읽습니다
+    getStructure()
+      .then((st) => {
+        populateSummarySelectors(st);
+        loadSummary();
+      })
+      .catch(() => loadSummary());
+  });
 
   try {
     await msalInstance.initialize();
