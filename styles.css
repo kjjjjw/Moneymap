@@ -506,27 +506,29 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .mode-toggle {
   display: flex;
   gap: 6px;
-  margin-bottom: 12px;
-  background: var(--card);
+  margin-bottom: 14px;
+  background: var(--sunken);
   border-radius: 12px;
-  padding: 4px;
+  padding: 5px;
 }
 
 .mode-btn {
   flex: 1;
-  padding: 9px;
+  padding: 11px;
   font-family: inherit;
-  font-size: 0.86rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   border: none;
   border-radius: 9px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .mode-btn.is-active {
-  background: var(--accent-soft);
+  background: var(--card);
   color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
