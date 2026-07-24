@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#413594">
+<meta name="theme-color" content="#4a3f7a">
 <title>가계부 지출 입력</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -14,7 +14,10 @@
 <body>
 <div class="app">
   <header class="topbar">
-    <h1>가계부</h1>
+    <div class="brand">
+      <h1>Moneymap</h1>
+      <p class="brand-sub">우리집 재정 로드맵</p>
+    </div>
     <div id="authArea"></div>
   </header>
 
@@ -100,7 +103,9 @@
   </main>
 
   <section id="loginArea" class="card login-card">
-    <p>OneDrive의 가계부_R2.xlsx 파일에 로그인하여 지출을 입력하세요.</p>
+    <div class="login-mark"></div>
+    <h2 class="login-title">Moneymap</h2>
+    <p class="login-desc">Microsoft 계정으로 로그인하면 OneDrive의 가계부와 연결됩니다.</p>
     <button type="button" id="loginBtn">Microsoft 계정으로 로그인</button>
     <p id="loginError" class="status error"></p>
   </section>
