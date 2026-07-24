@@ -13,10 +13,10 @@
   --line: #e9e7e1;
   --line-2: #dddad2;
 
-  --violet: #4a3f7a;
-  --violet-2: #6d5fb8;
-  --violet-soft: #efedf8;
-  --violet-ink: #372f5c;
+  --violet: #4a3ab8;
+  --violet-2: #5945ce;
+  --violet-soft: #eeebfb;
+  --violet-ink: #33288a;
 
   --brass: #a8863f;
   --brass-2: #c4a256;
@@ -36,7 +36,7 @@
   --r: 14px;
   --r-sm: 10px;
   --shadow-card: 0 1px 2px rgba(27,26,34,0.04), 0 4px 16px rgba(27,26,34,0.05);
-  --shadow-hero: 0 4px 24px rgba(74,63,122,0.28);
+  --shadow-hero: 0 4px 24px rgba(89,69,206,0.30);
   --shadow-pop: 0 2px 6px rgba(27,26,34,0.10);
 }
 
@@ -102,6 +102,22 @@ body {
   align-items: flex-start;
   padding: 20px 6px 22px;
 }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex: 0 0 auto;
+  box-shadow: 0 2px 8px rgba(89,69,206,0.28);
+}
+
+.brand-text { min-width: 0; }
 
 .brand h1 {
   font-size: 1.5rem;
@@ -319,20 +335,12 @@ button[type="submit"]:disabled { opacity: 0.5; cursor: default; }
 .login-card { text-align: center; padding: 44px 28px; margin-top: 24px; }
 
 .login-mark {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 18px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, var(--violet-2), var(--violet));
-  box-shadow: var(--shadow-hero);
-  position: relative;
-}
-.login-mark::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 16px;
-  border: 1.5px solid rgba(255,255,255,0.25);
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+  border-radius: 20px;
+  box-shadow: 0 6px 20px rgba(89,69,206,0.32);
 }
 
 .login-title { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 8px; }
