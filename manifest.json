@@ -1,11 +1,15 @@
 {
+  "id": "/Moneymap/",
   "name": "준우 💕 소히 · 우리집 재정 로드맵",
   "short_name": "준우💕소히",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#f5f4f1",
   "theme_color": "#5945ce",
+  "description": "우리집 재정 로드맵 · 지출과 소득을 기록하고 계획 대비 실적을 봅니다.",
+  "lang": "ko",
   "icons": [
     {
       "src": "icons/icon-192.png",

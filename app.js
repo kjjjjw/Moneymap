@@ -1,3 +1,20 @@
+// ── 홈 화면 설치 이벤트 ────────────────────────────────────
+// 이 리스너는 페이지 초기에 등록돼야 이벤트를 놓치지 않습니다.
+let deferredInstall = null;
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  const btn = document.getElementById("installBtn");
+  if (btn) btn.hidden = false;
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstall = null;
+  const btn = document.getElementById("installBtn");
+  if (btn) btn.hidden = true;
+});
+
 const CATEGORY_TREE = {
   "고정비": {
     "주거비": ["주담대 원리금", "아파트 관리비"],
@@ -1193,6 +1210,7 @@ async function init() {
   el("major").addEventListener("change", () => populateMinor());
   el("minor").addEventListener("change", () => populateDetail());
   el("entryForm").addEventListener("submit", handleSubmit);
+  setupInstallButton();
 
   // 금액 입력 중 천 단위 콤마를 실시간으로 적용합니다.
   el("amount").addEventListener("input", (e) => {
@@ -1262,6 +1280,27 @@ async function init() {
   } else {
     showLogin();
   }
+}
+
+// ── 홈 화면에 앱 설치 ──────────────────────────────────────
+// 안드로이드/데스크톱 크롬은 조건이 맞으면 beforeinstallprompt를 보냅니다.
+// 그 이벤트를 잡아뒀다가 버튼을 눌렀을 때 설치창을 띄웁니다.
+function setupInstallButton() {
+  const btn = document.getElementById("installBtn");
+  if (!btn) return;
+  // 이미 설치되어 실행 중이면 버튼을 숨깁니다.
+  const standalone = window.matchMedia("(display-mode: standalone)").matches
+    || window.navigator.standalone === true;
+  if (standalone) { btn.hidden = true; return; }
+  if (deferredInstall) btn.hidden = false;
+
+  btn.addEventListener("click", async () => {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    try { await deferredInstall.userChoice; } catch (e) {}
+    deferredInstall = null;
+    btn.hidden = true;
+  });
 }
 
 if ("serviceWorker" in navigator) {

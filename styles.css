@@ -137,7 +137,7 @@ body {
   text-transform: uppercase;
 }
 
-#authArea { display: flex; align-items: center; gap: 10px; padding-top: 4px; }
+#authArea { display: flex; align-items: center; gap: 10px; }
 .who { font-size: 0.72rem; color: var(--ink-3); font-weight: 500; }
 
 /* ── 카드 공통 ─────────────────────────────────────────── */
@@ -793,3 +793,28 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .toast { transition: opacity 0.01s; }
 }
+
+/* ── 앱 설치 버튼 ──────────────────────────────────────── */
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.install-btn {
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding: 7px 13px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--violet-2), var(--violet));
+  color: var(--on-accent);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-pop);
+}
+
+.install-btn:active { transform: scale(0.97); }
