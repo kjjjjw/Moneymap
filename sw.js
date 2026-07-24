@@ -1,10 +1,16 @@
-const CACHE_NAME = "gagyebu-shell-v13";
+const CACHE_NAME = "gagyebu-shell-v15";
 const SHELL_FILES = [
   "index.html",
   "styles.css",
   "app.js",
   "config.js",
-  "manifest.json"
+  "manifest.json",
+  "icons/char-saved.png",
+  "icons/char-deleted.png",
+  "icons/char-edited.png",
+  "icons/char-empty.png",
+  "icons/char-chart.png",
+  "icons/char-login.png"
 ];
 
 self.addEventListener("install", (event) => {

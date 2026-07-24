@@ -120,7 +120,8 @@ body {
 .brand-text { min-width: 0; }
 
 .brand h1 {
-  font-size: 1.5rem;
+  font-size: 1.32rem;
+  white-space: nowrap;
   font-weight: 800;
   letter-spacing: -0.04em;
   margin: 0;
@@ -262,6 +263,33 @@ input::placeholder { color: var(--ink-3); font-weight: 400; }
   letter-spacing: -0.03em;
 }
 
+/* 입력값은 크게, 안내 문구는 다른 칸과 같은 크기로 */
+#amount::placeholder {
+  font-size: 1rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* ── 브랜드 하트 ───────────────────────────────────────── */
+.brand h1 .heart {
+  font-size: 0.85em;
+  margin: 0 1px;
+  vertical-align: 0.02em;
+}
+
+/* ── 내역 월 필터 ──────────────────────────────────────── */
+.recent-filter {
+  margin: 12px 0 2px;
+}
+
+.recent-filter select {
+  width: 100%;
+  font-size: 0.86rem;
+  font-weight: 600;
+  padding: 11px 34px 11px 13px;
+  border-radius: var(--r-sm);
+}
+
 button[type="submit"] {
   width: 100%;
   padding: 16px;
@@ -336,11 +364,11 @@ button[type="submit"]:disabled { opacity: 0.5; cursor: default; }
 
 .login-mark {
   display: block;
-  width: 72px;
-  height: 72px;
-  margin: 0 auto 20px;
-  border-radius: 20px;
-  box-shadow: 0 6px 20px rgba(89,69,206,0.32);
+  width: 120px;
+  height: 120px;
+  margin: 0 auto 14px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 14px rgba(89,69,206,0.18));
 }
 
 .login-title { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 8px; }
@@ -682,4 +710,86 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   캐릭터 요소
+   ═══════════════════════════════════════════════════════════ */
+
+/* 저장·수정·삭제 안내 토스트 */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px 10px 10px;
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 6px 24px rgba(27,26,34,0.18), 0 0 0 1px var(--line);
+  transform: translate(-50%, 16px);
+  opacity: 0;
+  transition: opacity 0.24s ease, transform 0.24s cubic-bezier(0.22,1,0.36,1);
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+}
+
+.toast.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.toast-img {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.toast-text {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* 내역·실적이 비었을 때 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 26px 12px 20px;
+  border-bottom: none !important;
+  list-style: none;
+}
+
+.empty-img {
+  width: 116px;
+  height: 116px;
+  object-fit: contain;
+  opacity: 0.95;
+  margin-bottom: 12px;
+}
+
+.empty-msg {
+  margin: 0;
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: var(--ink-2);
+  letter-spacing: -0.02em;
+}
+
+.empty-sub {
+  margin: 5px 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { transition: opacity 0.01s; }
 }

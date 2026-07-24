@@ -27,7 +27,8 @@ const CATEGORY_TREE = {
   }
 };
 
-const PAGE_SIZE = 20;
+const FIRST_PAGE_SIZE = 10;  // 처음 보여줄 건수
+const PAGE_SIZE = 20;        // "더 보기" 한 번에 추가할 건수
 
 const msalInstance = new msal.PublicClientApplication({
   auth: {
@@ -46,6 +47,9 @@ const el = (id) => document.getElementById(id);
 let loadedRows = [];        // { index, values } — 최신 항목이 배열 앞쪽
 let totalRows = 0;
 let isLoading = false;
+let recentMonthFilter = "";   // "" = 전체 기간, "2026-07" 형태
+let allRowsCache = null;      // 월 필터용 전체 행 캐시
+let shownCount = 0;           // 월 필터 상태에서 현재 보여준 건수
 
 // ── 수정 상태 ──────────────────────────────────────────────
 let editingIndex = null;    // 표 안에서의 행 위치
@@ -207,7 +211,40 @@ async function setEntryMode(mode) {
   el("recentTitle").textContent = mode === "income" ? "소득 · 저축 내역" : "지출 내역";
   populateMajor();
   showStatus("", false);
+  recentMonthFilter = "";
+  el("recentMonth").value = "";
+  allRowsCache = null;
   await loadRows(true);
+  populateRecentMonths();
+}
+
+// ── 캐릭터 토스트 ──────────────────────────────────────────
+let toastTimer = null;
+
+const TOAST_CHARS = {
+  saved:   { img: "icons/char-saved.png",   alt: "" },
+  deleted: { img: "icons/char-deleted.png", alt: "" },
+  edited:  { img: "icons/char-edited.png",  alt: "" }
+};
+
+function showToast(kind, message) {
+  const box = el("toast");
+  const conf = TOAST_CHARS[kind];
+  if (!box || !conf) return;
+
+  el("toastImg").src = conf.img;
+  el("toastText").textContent = message;
+  box.hidden = false;
+  // 재생 중이던 애니메이션을 초기화합니다.
+  box.classList.remove("is-on");
+  void box.offsetWidth;
+  box.classList.add("is-on");
+
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    box.classList.remove("is-on");
+    setTimeout(() => { box.hidden = true; }, 260);
+  }, 2200);
 }
 
 function showStatus(msg, isError) {
@@ -354,8 +391,34 @@ async function loadRows(reset) {
   const tableName = currentTableName();
   try {
     const fileId = await getFileId();
+
+    // 월 필터가 걸린 경우: 그 달 데이터가 표 어디에 있을지 알 수 없으므로
+    // 전체를 한 번 받아 클라이언트에서 거릅니다.
+    if (recentMonthFilter) {
+      if (reset || allRowsCache === null) {
+        list.innerHTML = "<li class='muted'>불러오는 중...</li>";
+        el("listMeta").textContent = "";
+        const data = await graphFetch(`${tablePath(fileId, tableName)}/rows`);
+        allRowsCache = (data.value || []).map((r, i) => ({
+          index: typeof r.index === "number" ? r.index : i,
+          values: (r.values && r.values[0]) || []
+        }));
+      }
+      const filtered = allRowsCache
+        .filter((r) => toDateInput(r.values[0]).startsWith(recentMonthFilter))
+        .reverse();
+      totalRows = filtered.length;
+      if (reset) shownCount = FIRST_PAGE_SIZE;
+      else shownCount += PAGE_SIZE;
+      loadedRows = filtered.slice(0, shownCount);
+      renderRows();
+      return;
+    }
+
+    // 전체 기간: 표 뒤쪽부터 필요한 만큼만 받아옵니다.
     if (reset) {
       loadedRows = [];
+      allRowsCache = null;
       list.innerHTML = "<li class='muted'>불러오는 중...</li>";
       el("listMeta").textContent = "";
       totalRows = await getRowCount(fileId, tableName);
@@ -365,7 +428,8 @@ async function loadRows(reset) {
 
     const remaining = totalRows - loadedRows.length;
     if (remaining > 0) {
-      const top = Math.min(PAGE_SIZE, remaining);
+      const pageSize = loadedRows.length === 0 ? FIRST_PAGE_SIZE : PAGE_SIZE;
+      const top = Math.min(pageSize, remaining);
       const skip = remaining - top;
       const data = await graphFetch(`${tablePath(fileId, tableName)}/rows?$top=${top}&$skip=${skip}`);
       const batch = (data.value || []).map((r, i) => ({
@@ -385,13 +449,56 @@ async function loadRows(reset) {
   }
 }
 
+// 표 전체를 훑어 데이터가 있는 월 목록을 만듭니다.
+async function populateRecentMonths() {
+  const sel = el("recentMonth");
+  const keep = sel.value;
+  try {
+    const fileId = await getFileId();
+    const tableName = currentTableName();
+    const data = await graphFetch(`${tablePath(fileId, tableName)}/rows`);
+    allRowsCache = (data.value || []).map((r, i) => ({
+      index: typeof r.index === "number" ? r.index : i,
+      values: (r.values && r.values[0]) || []
+    }));
+
+    const months = new Set();
+    for (const r of allRowsCache) {
+      const d = toDateInput(r.values[0]);
+      if (/^\d{4}-\d{2}/.test(d)) months.add(d.slice(0, 7));
+    }
+
+    sel.innerHTML = '<option value="">전체 기간</option>';
+    for (const m of Array.from(months).sort().reverse()) {
+      const [y, mo] = m.split("-");
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = `${y}년 ${Number(mo)}월`;
+      sel.appendChild(opt);
+    }
+    if (keep && months.has(keep)) sel.value = keep;
+  } catch (e) {
+    // 월 목록을 못 만들어도 전체 기간 보기는 동작합니다.
+  }
+}
+
 function renderRows() {
   const list = el("recentList");
   list.innerHTML = "";
 
   if (loadedRows.length === 0) {
-    const what = entryMode === "income" ? "소득·저축 내역이" : "지출 내역이";
-    list.innerHTML = `<li class='muted'>아직 입력한 ${what} 없습니다. 위에서 첫 항목을 남겨보세요.</li>`;
+    const msg = recentMonthFilter
+      ? "이 달에는 내역이 없어요."
+      : (entryMode === "income"
+          ? "아직 소득·저축 내역이 없어요."
+          : "아직 지출 내역이 없어요.");
+    const sub = recentMonthFilter ? "다른 달을 골라보세요." : "위에서 첫 항목을 남겨보세요.";
+    list.innerHTML = `
+      <li class="empty-state">
+        <img class="empty-img" src="icons/char-empty.png" alt="">
+        <p class="empty-msg">${msg}</p>
+        <p class="empty-sub">${sub}</p>
+      </li>`;
   }
 
   for (const row of loadedRows) {
@@ -442,8 +549,9 @@ function renderRows() {
 
   const more = totalRows - loadedRows.length;
   el("moreBtn").hidden = more <= 0;
+  const scope = recentMonthFilter ? "이 달" : "전체";
   el("listMeta").textContent = totalRows
-    ? `전체 ${totalRows.toLocaleString("ko-KR")}건 중 ${loadedRows.length.toLocaleString("ko-KR")}건`
+    ? `${scope} ${totalRows.toLocaleString("ko-KR")}건 중 ${loadedRows.length.toLocaleString("ko-KR")}건`
     : "";
 }
 
@@ -516,13 +624,17 @@ async function handleSubmit(e) {
       await updateRow(tableName, editingIndex, editingOriginal, values);
       cancelEdit();
       showStatus("수정했습니다.", false);
+      showToast("edited", "수정했어요!");
     } else {
       await addRow(tableName, values);
       showStatus("저장했습니다.", false);
+      showToast("saved", "저장 완료!");
       el("amount").value = "";
       el("memo").value = "";
     }
+    allRowsCache = null;
     await loadRows(true);
+    populateRecentMonths();
   } catch (err) {
     showStatus(err.message, true);
   } finally {
@@ -540,7 +652,10 @@ async function handleDelete(row) {
     await deleteRow(currentTableName(), row.index, row.values);
     if (editingIndex === row.index) cancelEdit();
     showStatus("삭제했습니다.", false);
+    showToast("deleted", "삭제했어요");
+    allRowsCache = null;
     await loadRows(true); // 삭제하면 뒤쪽 행 index가 밀리므로 전체를 다시 읽습니다
+    populateRecentMonths();
   } catch (err) {
     showStatus(err.message, true);
   }
@@ -802,7 +917,12 @@ async function loadSummary() {
 
     const cols = columnsFor(st, summaryMode, summaryYear, summaryMonth);
     if (!cols) {
-      body.innerHTML = "<p class='muted'>시트에 이 기간의 열이 없습니다. 다른 월이나 연도를 선택해주세요.</p>";
+      body.innerHTML = `
+        <div class="empty-state">
+          <img class="empty-img" src="icons/char-chart.png" alt="">
+          <p class="empty-msg">이 기간은 아직 없어요.</p>
+          <p class="empty-sub">다른 월이나 연도를 골라보세요.</p>
+        </div>`;
       return;
     }
 
@@ -1052,13 +1172,13 @@ function switchTab(name) {
 function showApp() {
   el("loginArea").hidden = true;
   el("mainArea").hidden = false;
-  el("authArea").innerHTML = `<span class="who"></span> <button type="button" id="logoutBtn" class="linklike">로그아웃</button>`;
-  el("authArea").querySelector(".who").textContent = msalInstance.getAllAccounts()[0].username;
+  el("authArea").innerHTML = `<button type="button" id="logoutBtn" class="linklike">로그아웃</button>`;
   el("logoutBtn").addEventListener("click", () => {
     localStorage.removeItem("gagyebu_fileId");
     msalInstance.logoutRedirect();
   });
   loadRows(true);
+  populateRecentMonths();
 }
 
 function showLogin() {
@@ -1087,7 +1207,16 @@ async function init() {
     input.setSelectionRange(pos, pos);
   });
   el("cancelEditBtn").addEventListener("click", cancelEdit);
-  el("refreshBtn").addEventListener("click", () => loadRows(true));
+  el("refreshBtn").addEventListener("click", () => {
+    allRowsCache = null;
+    loadRows(true);
+    populateRecentMonths();
+  });
+
+  el("recentMonth").addEventListener("change", (e) => {
+    recentMonthFilter = e.target.value;
+    loadRows(true);
+  });
   el("moreBtn").addEventListener("click", () => loadRows(false));
   el("loginBtn").addEventListener("click", () => msalInstance.loginRedirect({ scopes: GRAPH_SCOPES }));
 

@@ -17,7 +17,7 @@
     <div class="brand">
       <img class="brand-mark" src="icons/logo.png" alt="" width="38" height="38">
       <div class="brand-text">
-        <h1>Moneymap</h1>
+        <h1>준우 <span class="heart">💕</span> 소히</h1>
         <p class="brand-sub">우리집 재정 로드맵</p>
       </div>
     </div>
@@ -26,7 +26,7 @@
 
   <main id="mainArea" hidden>
     <nav class="tabs" id="tabs">
-      <button type="button" class="tab-btn is-active" data-tab="entry">입력 · 내역</button>
+      <button type="button" class="tab-btn is-active" data-tab="entry">작성하기</button>
       <button type="button" class="tab-btn" data-tab="summary">계획 대비 실적</button>
     </nav>
 
@@ -79,6 +79,11 @@
           <h2 id="recentTitle">지출 내역</h2>
           <button type="button" id="refreshBtn" class="linklike">새로고침</button>
         </div>
+        <div class="recent-filter">
+          <select id="recentMonth" aria-label="월 선택">
+            <option value="">전체 기간</option>
+          </select>
+        </div>
         <ul id="recentList" class="recent-list"></ul>
         <button type="button" id="moreBtn" class="secondary-btn more-btn" hidden>더 보기</button>
         <p id="listMeta" class="list-meta" role="status"></p>
@@ -106,12 +111,17 @@
   </main>
 
   <section id="loginArea" class="card login-card">
-    <img class="login-mark" src="icons/logo.png" alt="" width="72" height="72">
-    <h2 class="login-title">Moneymap</h2>
+    <img class="login-mark" src="icons/char-login.png" alt="" width="120" height="120">
+    <h2 class="login-title">준우 <span class="heart">💕</span> 소히</h2>
     <p class="login-desc">Microsoft 계정으로 로그인하면 OneDrive의 가계부와 연결됩니다.</p>
     <button type="button" id="loginBtn">Microsoft 계정으로 로그인</button>
     <p id="loginError" class="status error"></p>
   </section>
+</div>
+
+<div id="toast" class="toast" hidden aria-live="polite">
+  <img id="toastImg" class="toast-img" src="" alt="">
+  <span id="toastText" class="toast-text"></span>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script><script src="config.js"></script>
