@@ -51,6 +51,28 @@ let isLoading = false;
 let editingIndex = null;    // 표 안에서의 행 위치
 let editingOriginal = null; // 불러왔을 때의 값 (덮어쓰기 전 대조용)
 
+// ── 금액 입력 포맷 ─────────────────────────────────────────
+// 입력창에는 천 단위 콤마를 넣어 보여주고, 저장할 때는 숫자만 꺼냅니다.
+function amountToNumber(str) {
+  const digits = String(str ?? "").replace(/[^0-9]/g, "");
+  return digits ? Number(digits) : 0;
+}
+
+function formatAmountInput(str) {
+  const digits = String(str ?? "").replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  return Number(digits).toLocaleString("ko-KR");
+}
+
+function setAmountValue(n) {
+  const num = Number(n || 0);
+  el("amount").value = num ? num.toLocaleString("ko-KR") : "";
+}
+
+function getAmountValue() {
+  return amountToNumber(el("amount").value);
+}
+
 function todayStr() {
   const d = new Date();
   const tzOffsetMs = d.getTimezoneOffset() * 60000;
@@ -434,7 +456,7 @@ function startEdit(row) {
   el("date").value = toDateInput(date);
   populateMajor(norm(major), norm(minor), norm(detail));
   el("memo").value = norm(memo);
-  el("amount").value = Number(amount || 0);
+  setAmountValue(amount);
 
   el("editBanner").hidden = false;
   el("editBanner").textContent = `${toDateInput(date)} · ${norm(detail)} 내역을 수정하는 중`;
@@ -468,12 +490,20 @@ function formValues() {
     el("minor").value,
     el("detail").value,
     el("memo").value,
-    Number(el("amount").value)
+    getAmountValue()
   ];
 }
 
 async function handleSubmit(e) {
   e.preventDefault();
+
+  // type=text로 바꾸면서 브라우저 기본 검증이 빠지므로 직접 확인합니다.
+  if (getAmountValue() <= 0) {
+    showStatus("금액을 입력하세요.", true);
+    el("amount").focus();
+    return;
+  }
+
   const submitBtn = el("submitBtn");
   submitBtn.disabled = true;
   const editing = editingIndex !== null;
@@ -1043,6 +1073,19 @@ async function init() {
   el("major").addEventListener("change", () => populateMinor());
   el("minor").addEventListener("change", () => populateDetail());
   el("entryForm").addEventListener("submit", handleSubmit);
+
+  // 금액 입력 중 천 단위 콤마를 실시간으로 적용합니다.
+  el("amount").addEventListener("input", (e) => {
+    const input = e.target;
+    const before = input.value;
+    const caretFromEnd = before.length - (input.selectionStart ?? before.length);
+    const formatted = formatAmountInput(before);
+    if (formatted === before) return;
+    input.value = formatted;
+    // 콤마가 늘거나 줄어도 커서가 같은 자리에 남도록 뒤에서부터 위치를 잡습니다.
+    const pos = Math.max(0, formatted.length - caretFromEnd);
+    input.setSelectionRange(pos, pos);
+  });
   el("cancelEditBtn").addEventListener("click", cancelEdit);
   el("refreshBtn").addEventListener("click", () => loadRows(true));
   el("moreBtn").addEventListener("click", () => loadRows(false));
