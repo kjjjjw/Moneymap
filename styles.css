@@ -164,18 +164,32 @@ body {
   flex: 1;
   position: relative;
   z-index: 1;
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px 9px;
   font-family: inherit;
-  font-size: 0.92rem;
+  font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   border: none;
-  border-radius: 10px;
+  border-radius: 11px;
   background: transparent;
   color: var(--ink-3);
   cursor: pointer;
-  transition: color 0.25s ease;
+  transition: color 0.22s ease, background 0.22s ease, transform 0.14s ease;
 }
+
+.tab-ico {
+  width: 21px;
+  height: 21px;
+  flex: 0 0 auto;
+  transition: transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.tab-btn.is-active .tab-ico { transform: translateY(-1px) scale(1.06); }
+.tab-btn:active { transform: scale(0.97); }
 
 .tab-btn.is-active {
   color: var(--on-accent);
@@ -279,16 +293,64 @@ input::placeholder { color: var(--ink-3); font-weight: 400; }
 
 /* ── 내역 월 필터 ──────────────────────────────────────── */
 .recent-filter {
+  display: flex;
+  gap: 8px;
   margin: 12px 0 2px;
 }
 
 .recent-filter select {
-  width: 100%;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 116px;
   font-size: 0.86rem;
   font-weight: 600;
-  padding: 11px 34px 11px 13px;
+  padding: 11px 32px 11px 13px;
   border-radius: var(--r-sm);
 }
+
+/* 검색창 */
+.search-box {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-box input {
+  width: 100%;
+  font-size: 0.86rem;
+  font-weight: 500;
+  padding: 11px 34px 11px 13px;
+  border-radius: var(--r-sm);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 브라우저 기본 X 버튼 숨김 (직접 만든 버튼을 씁니다) */
+.search-box input::-webkit-search-cancel-button,
+.search-box input::-webkit-search-decoration { -webkit-appearance: none; }
+
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  background: var(--track);
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 0;
+}
+
+.search-clear:hover { background: var(--line-2); color: var(--ink); }
 
 button[type="submit"] {
   width: 100%;
@@ -818,3 +880,272 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .install-btn:active { transform: scale(0.97); }
+
+/* ═══════════════════════════════════════════════════════════
+   달력 보기
+   ═══════════════════════════════════════════════════════════ */
+.calendar { padding: 18px 16px; }
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.cal-head h2 {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.cal-nav {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 1.3rem;
+  line-height: 1;
+  border: none;
+  border-radius: 10px;
+  background: var(--sunken);
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 0 0 3px;
+}
+
+.cal-nav:hover { background: var(--violet-soft); color: var(--violet); }
+
+/* 지출/소득 전환 */
+.cal-mode {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 14px;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.cal-mode-btn {
+  flex: 1;
+  padding: 9px;
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.cal-mode-btn.is-active {
+  background: var(--card);
+  color: var(--violet);
+  box-shadow: var(--shadow-pop);
+}
+
+/* 월 합계 */
+.cal-total {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 13px 16px;
+  margin-bottom: 14px;
+  border-radius: var(--r);
+  background: var(--violet-soft);
+  min-height: 20px;
+}
+
+.cal-total-label { font-size: 0.76rem; font-weight: 700; color: var(--violet); }
+.cal-total-value {
+  font-size: 1.15rem; font-weight: 800; color: var(--violet-ink);
+  letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+}
+.cal-total-count { font-size: 0.74rem; color: var(--ink-3); margin-left: auto; }
+
+/* 요일 머리 */
+.cal-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-bottom: 5px;
+}
+
+.cal-dow span {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink-3);
+  padding: 4px 0;
+}
+
+.cal-dow .sun { color: #d05a52; }
+.cal-dow .sat { color: #4a7fd0; }
+
+/* 날짜 격자 */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.cal-loading {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 0.86rem;
+  padding: 40px 0;
+  margin: 0;
+}
+
+.cal-cell {
+  position: relative;
+  aspect-ratio: 1 / 1.16;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1px;
+  padding: 5px 1px 4px;
+  border: none;
+  border-radius: 9px;
+  background: var(--sunken);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  overflow: hidden;
+}
+
+.cal-cell.is-blank { background: transparent; cursor: default; }
+
+.cal-day {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+
+.cal-cell.is-sun .cal-day { color: #d05a52; }
+.cal-cell.is-sat .cal-day { color: #4a7fd0; }
+
+.cal-amt {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--violet);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  text-align: center;
+  word-break: keep-all;
+}
+
+.cal-cell.has-data { background: var(--violet-soft); }
+
+.cal-cell.is-today {
+  box-shadow: inset 0 0 0 2px var(--brass);
+}
+
+.cal-cell.is-selected {
+  background: var(--violet);
+  box-shadow: var(--shadow-pop);
+}
+.cal-cell.is-selected .cal-day,
+.cal-cell.is-selected .cal-amt { color: #fff; }
+
+/* 선택한 날 상세 */
+.cal-detail {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: var(--r);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+}
+
+.cal-detail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.cal-detail-date { font-size: 0.94rem; font-weight: 800; letter-spacing: -0.02em; }
+.cal-detail-sum {
+  font-size: 1.02rem; font-weight: 800; color: var(--violet);
+  letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+}
+
+.cal-detail-empty {
+  margin: 12px 0 2px;
+  font-size: 0.85rem;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.cal-detail-list { list-style: none; margin: 0; padding: 0; }
+
+.cal-detail-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.cal-detail-list li:last-child { border-bottom: none; padding-bottom: 0; }
+
+.cd-cat { font-size: 0.86rem; font-weight: 700; letter-spacing: -0.02em; }
+.cd-amt {
+  text-align: right; font-size: 0.92rem; font-weight: 800;
+  letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+}
+.cd-memo { grid-column: 1 / -1; font-size: 0.76rem; color: var(--ink-3); }
+
+
+
+/* ── 공휴일 ────────────────────────────────────────────── */
+.cal-cell.is-holiday .cal-day { color: #d05a52; }
+
+.cal-holi {
+  font-size: 0.52rem;
+  font-weight: 700;
+  color: #d05a52;
+  line-height: 1.05;
+  text-align: center;
+  letter-spacing: -0.04em;
+  word-break: keep-all;
+  opacity: 0.9;
+}
+
+.cal-cell.is-selected .cal-holi { color: #ffd5d3; }
+
+.cd-holi {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(208,90,82,0.12);
+  color: #d05a52;
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .cal-cell.is-holiday .cal-day,
+  .cal-holi,
+  .cd-holi { color: #f08b84; }
+  .cd-holi { background: rgba(240,139,132,0.15); }
+  .cal-dow .sun { color: #f08b84; }
+  .cal-cell.is-sun .cal-day { color: #f08b84; }
+  .cal-dow .sat { color: #7fa9e8; }
+  .cal-cell.is-sat .cal-day { color: #7fa9e8; }
+}

@@ -65,6 +65,7 @@ let loadedRows = [];        // { index, values } — 최신 항목이 배열 앞
 let totalRows = 0;
 let isLoading = false;
 let recentMonthFilter = "";   // "" = 전체 기간, "2026-07" 형태
+let recentSearchTerm = "";    // 내역 검색어 (분류·항목·메모)
 let allRowsCache = null;      // 월 필터용 전체 행 캐시
 let shownCount = 0;           // 월 필터 상태에서 현재 보여준 건수
 
@@ -230,6 +231,9 @@ async function setEntryMode(mode) {
   showStatus("", false);
   recentMonthFilter = "";
   el("recentMonth").value = "";
+  recentSearchTerm = "";
+  el("recentSearch").value = "";
+  el("searchClear").hidden = true;
   allRowsCache = null;
   await loadRows(true);
   populateRecentMonths();
@@ -409,9 +413,9 @@ async function loadRows(reset) {
   try {
     const fileId = await getFileId();
 
-    // 월 필터가 걸린 경우: 그 달 데이터가 표 어디에 있을지 알 수 없으므로
+    // 월 필터나 검색이 걸린 경우: 해당 데이터가 표 어디에 있을지 알 수 없으므로
     // 전체를 한 번 받아 클라이언트에서 거릅니다.
-    if (recentMonthFilter) {
+    if (recentMonthFilter || recentSearchTerm) {
       if (reset || allRowsCache === null) {
         list.innerHTML = "<li class='muted'>불러오는 중...</li>";
         el("listMeta").textContent = "";
@@ -422,7 +426,8 @@ async function loadRows(reset) {
         }));
       }
       const filtered = allRowsCache
-        .filter((r) => toDateInput(r.values[0]).startsWith(recentMonthFilter))
+        .filter((r) => !recentMonthFilter || toDateInput(r.values[0]).startsWith(recentMonthFilter))
+        .filter((r) => rowMatchesSearch(r, recentSearchTerm))
         .reverse();
       totalRows = filtered.length;
       if (reset) shownCount = FIRST_PAGE_SIZE;
@@ -499,17 +504,36 @@ async function populateRecentMonths() {
   }
 }
 
+// 한 행이 검색어와 맞는지 — 분류·세부항목·메모·금액을 모두 훑습니다.
+function rowMatchesSearch(row, term) {
+  if (!term) return true;
+  const [date, major, minor, detail, memo, amount] = row.values;
+  const hay = [
+    toDateInput(date),
+    norm(major), norm(minor), norm(detail), norm(memo),
+    String(Number(amount || 0)),                       // 15000 으로 검색
+    Number(amount || 0).toLocaleString("ko-KR")        // 15,000 으로도 검색
+  ].join(" ").toLowerCase();
+  // 공백으로 나눈 여러 단어가 모두 포함되어야 합니다.
+  return term.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
+}
+
 function renderRows() {
   const list = el("recentList");
   list.innerHTML = "";
 
   if (loadedRows.length === 0) {
-    const msg = recentMonthFilter
-      ? "이 달에는 내역이 없어요."
-      : (entryMode === "income"
-          ? "아직 소득·저축 내역이 없어요."
-          : "아직 지출 내역이 없어요.");
-    const sub = recentMonthFilter ? "다른 달을 골라보세요." : "위에서 첫 항목을 남겨보세요.";
+    let msg, sub;
+    if (recentSearchTerm) {
+      msg = "찾는 내역이 없어요.";
+      sub = "다른 말로 검색해보세요.";
+    } else if (recentMonthFilter) {
+      msg = "이 달에는 내역이 없어요.";
+      sub = "다른 달을 골라보세요.";
+    } else {
+      msg = entryMode === "income" ? "아직 소득·저축 내역이 없어요." : "아직 지출 내역이 없어요.";
+      sub = "위에서 첫 항목을 남겨보세요.";
+    }
     list.innerHTML = `
       <li class="empty-state">
         <img class="empty-img" src="icons/char-empty.png" alt="">
@@ -566,7 +590,7 @@ function renderRows() {
 
   const more = totalRows - loadedRows.length;
   el("moreBtn").hidden = more <= 0;
-  const scope = recentMonthFilter ? "이 달" : "전체";
+  const scope = recentSearchTerm ? "검색 결과" : (recentMonthFilter ? "이 달" : "전체");
   el("listMeta").textContent = totalRows
     ? `${scope} ${totalRows.toLocaleString("ko-KR")}건 중 ${loadedRows.length.toLocaleString("ko-KR")}건`
     : "";
@@ -650,6 +674,7 @@ async function handleSubmit(e) {
       el("memo").value = "";
     }
     allRowsCache = null;
+    calLoadedKey = null;   // 달력도 다시 읽도록
     await loadRows(true);
     populateRecentMonths();
   } catch (err) {
@@ -671,6 +696,7 @@ async function handleDelete(row) {
     showStatus("삭제했습니다.", false);
     showToast("deleted", "삭제했어요");
     allRowsCache = null;
+    calLoadedKey = null;   // 달력도 다시 읽도록
     await loadRows(true); // 삭제하면 뒤쪽 행 index가 밀리므로 전체를 다시 읽습니다
     populateRecentMonths();
   } catch (err) {
@@ -1164,13 +1190,235 @@ function renderSummary(st, range, cols) {
   `;
 }
 
+// ═══════════════════════════════════════════════════════════
+// 달력 보기
+// ═══════════════════════════════════════════════════════════
+let calYear = null;
+let calMonth = null;          // 1~12
+let calMode = "expense";      // "expense" | "income"
+let calRows = [];             // 그 달의 행들
+let calSelectedDay = null;    // 선택한 날짜(1~31)
+let calLoadedKey = null;      // "expense-2026-07" 형태, 중복 로딩 방지
+
+function calTableName() {
+  return calMode === "income" ? APP_CONFIG.incomeTableName : APP_CONFIG.tableName;
+}
+
+function calKey() {
+  return `${calMode}-${calYear}-${String(calMonth).padStart(2, "0")}`;
+}
+
+function initCalendarDate() {
+  if (calYear) return;
+  const now = new Date();
+  calYear = now.getFullYear();
+  calMonth = now.getMonth() + 1;
+}
+
+function calShiftMonth(delta) {
+  calMonth += delta;
+  if (calMonth < 1) { calMonth = 12; calYear -= 1; }
+  else if (calMonth > 12) { calMonth = 1; calYear += 1; }
+  calSelectedDay = null;
+  loadCalendar();
+}
+
+async function loadCalendar() {
+  initCalendarDate();
+  const grid = el("calGrid");
+  const key = calKey();
+
+  el("calTitle").textContent = `${calYear}년 ${calMonth}월`;
+  document.querySelectorAll(".cal-mode-btn").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.calmode === calMode);
+  });
+
+  if (calLoadedKey === key && calRows.length >= 0) {
+    renderCalendar();
+    return;
+  }
+
+  grid.innerHTML = "<p class='cal-loading'>불러오는 중...</p>";
+  el("calTotal").textContent = "";
+  el("calDetail").hidden = true;
+
+  try {
+    const fileId = await getFileId();
+    const data = await graphFetch(`${tablePath(fileId, calTableName())}/rows`);
+    const prefix = `${calYear}-${String(calMonth).padStart(2, "0")}`;
+    calRows = (data.value || [])
+      .map((r, i) => ({
+        index: typeof r.index === "number" ? r.index : i,
+        values: (r.values && r.values[0]) || []
+      }))
+      .filter((r) => toDateInput(r.values[0]).startsWith(prefix));
+    calLoadedKey = key;
+    renderCalendar();
+  } catch (e) {
+    grid.innerHTML = `<p class='cal-loading'>불러오지 못했습니다: ${e.message}</p>`;
+  }
+}
+
+// 날짜별로 금액을 모읍니다.
+function calDayTotals() {
+  const map = {};
+  for (const r of calRows) {
+    const d = toDateInput(r.values[0]);
+    const day = Number(d.slice(8, 10));
+    if (!day) continue;
+    if (!map[day]) map[day] = { sum: 0, items: [] };
+    map[day].sum += Number(r.values[5] || 0);
+    map[day].items.push(r);
+  }
+  return map;
+}
+
+// 공휴일이면 이름을 돌려줍니다.
+function holidayName(dateStr) {
+  return (typeof KR_HOLIDAYS !== "undefined" && KR_HOLIDAYS[dateStr]) || null;
+}
+
+function renderCalendar() {
+  const grid = el("calGrid");
+  const totals = calDayTotals();
+  const first = new Date(calYear, calMonth - 1, 1);
+  const startDow = first.getDay();                     // 0=일
+  const daysInMonth = new Date(calYear, calMonth, 0).getDate();
+  const today = todayStr();
+
+  // 월 합계
+  const monthSum = calRows.reduce((s, r) => s + Number(r.values[5] || 0), 0);
+  const label = calMode === "income" ? "이 달 수입·저축" : "이 달 지출";
+  el("calTotal").innerHTML = `
+    <span class="cal-total-label">${label}</span>
+    <span class="cal-total-value">${fmtWon(monthSum)}</span>
+    <span class="cal-total-count">${calRows.length}건</span>
+  `;
+
+  grid.innerHTML = "";
+
+  // 앞쪽 빈 칸
+  for (let i = 0; i < startDow; i++) {
+    const cell = document.createElement("div");
+    cell.className = "cal-cell is-blank";
+    grid.appendChild(cell);
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${calYear}-${String(calMonth).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    const info = totals[d];
+    const dow = (startDow + d - 1) % 7;
+
+    const holiday = holidayName(dateStr);
+
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "cal-cell";
+    if (dow === 0) cell.classList.add("is-sun");
+    if (dow === 6) cell.classList.add("is-sat");
+    if (holiday) cell.classList.add("is-holiday");
+    if (dateStr === today) cell.classList.add("is-today");
+    if (calSelectedDay === d) cell.classList.add("is-selected");
+    if (info) cell.classList.add("has-data");
+    if (holiday) cell.title = holiday;
+
+    const num = document.createElement("span");
+    num.className = "cal-day";
+    num.textContent = d;
+    cell.appendChild(num);
+
+    if (holiday) {
+      const hd = document.createElement("span");
+      hd.className = "cal-holi";
+      // 칸이 좁아 짧게 줄입니다 (설날 연휴 → 설날)
+      hd.textContent = holiday.replace(/\s*(연휴|대체)$/, "");
+      cell.appendChild(hd);
+    }
+
+    if (info) {
+      const amt = document.createElement("span");
+      amt.className = "cal-amt";
+      // 만 원 단위로 줄여 표시 (칸이 좁아서)
+      amt.textContent = compactWon(info.sum);
+      cell.appendChild(amt);
+    }
+
+    cell.addEventListener("click", () => {
+      calSelectedDay = (calSelectedDay === d) ? null : d;
+      renderCalendar();
+    });
+
+    grid.appendChild(cell);
+  }
+
+  renderCalDetail(totals);
+}
+
+// 좁은 칸에 넣기 위해 금액을 짧게 (12,345 → 1.2만)
+function compactWon(n) {
+  const v = Number(n || 0);
+  if (v === 0) return "";
+  if (v >= 100000000) return (v / 100000000).toFixed(1).replace(/\.0$/, "") + "억";
+  if (v >= 10000) {
+    const man = v / 10000;
+    return (man >= 100 ? Math.round(man) : man.toFixed(1).replace(/\.0$/, "")) + "만";
+  }
+  return v.toLocaleString("ko-KR");
+}
+
+function renderCalDetail(totals) {
+  const box = el("calDetail");
+  if (!calSelectedDay) { box.hidden = true; return; }
+
+  const info = totals[calSelectedDay];
+  const dateStr = `${calYear}-${String(calMonth).padStart(2,"0")}-${String(calSelectedDay).padStart(2,"0")}`;
+  const dowNames = ["일","월","화","수","목","금","토"];
+  const dow = dowNames[new Date(calYear, calMonth-1, calSelectedDay).getDay()];
+  const holi = holidayName(dateStr);
+  const holiTag = holi ? ` <span class="cd-holi">${holi}</span>` : "";
+
+  box.hidden = false;
+
+  if (!info) {
+    box.innerHTML = `
+      <div class="cal-detail-head">
+        <span class="cal-detail-date">${calMonth}월 ${calSelectedDay}일 (${dow})${holiTag}</span>
+      </div>
+      <p class="cal-detail-empty">이 날은 내역이 없어요.</p>`;
+    return;
+  }
+
+  let html = `
+    <div class="cal-detail-head">
+      <span class="cal-detail-date">${calMonth}월 ${calSelectedDay}일 (${dow})${holiTag}</span>
+      <span class="cal-detail-sum">${fmtWon(info.sum)}</span>
+    </div>
+    <ul class="cal-detail-list">`;
+
+  for (const r of info.items) {
+    const [, major, minor, detail, memo, amount] = r.values;
+    const cat = [major, minor, detail].filter(Boolean).join(" · ");
+    html += `
+      <li>
+        <span class="cd-cat">${cat}</span>
+        <span class="cd-amt">${fmtWon(amount)}</span>
+        ${memo ? `<span class="cd-memo">${norm(memo)}</span>` : ""}
+      </li>`;
+  }
+  html += `</ul>`;
+  box.innerHTML = html;
+}
+
 function switchTab(name) {
-  const isEntry = name === "entry";
-  el("tab-entry").hidden = !isEntry;
-  el("tab-summary").hidden = isEntry;
+  el("tab-entry").hidden = name !== "entry";
+  el("tab-calendar").hidden = name !== "calendar";
+  el("tab-summary").hidden = name !== "summary";
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.tab === name);
   });
+  if (name === "calendar") {
+    loadCalendar();
+  }
   if (name === "summary") {
     if (!summaryYear) {
       getStructure()
@@ -1235,6 +1483,26 @@ async function init() {
     recentMonthFilter = e.target.value;
     loadRows(true);
   });
+
+  // 검색: 타이핑이 멈춘 뒤에 한 번만 걸러 화면 깜빡임을 줄입니다.
+  let searchTimer = null;
+  el("recentSearch").addEventListener("input", (e) => {
+    const v = e.target.value;
+    el("searchClear").hidden = !v;
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      recentSearchTerm = v.trim();
+      loadRows(true);
+    }, 250);
+  });
+
+  el("searchClear").addEventListener("click", () => {
+    el("recentSearch").value = "";
+    el("searchClear").hidden = true;
+    recentSearchTerm = "";
+    loadRows(true);
+    el("recentSearch").focus();
+  });
   el("moreBtn").addEventListener("click", () => loadRows(false));
   el("loginBtn").addEventListener("click", () => msalInstance.loginRedirect({ scopes: GRAPH_SCOPES }));
 
@@ -1244,6 +1512,18 @@ async function init() {
 
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  el("calPrev").addEventListener("click", () => calShiftMonth(-1));
+  el("calNext").addEventListener("click", () => calShiftMonth(1));
+  document.querySelectorAll(".cal-mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (calMode === btn.dataset.calmode) return;
+      calMode = btn.dataset.calmode;
+      calSelectedDay = null;
+      calLoadedKey = null;
+      loadCalendar();
+    });
   });
   el("summaryMode").addEventListener("change", (e) => {
     summaryMode = e.target.value;
