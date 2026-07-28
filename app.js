@@ -1277,7 +1277,9 @@ async function openFixedSheet() {
 }
 
 function closeFixedSheet() {
-  el("fixedSheet").hidden = true;
+  const sheet = el("fixedSheet");
+  if (!sheet) return;
+  sheet.hidden = true;
   document.body.classList.remove("sheet-open");
 }
 
@@ -1721,6 +1723,9 @@ async function init() {
   el("fixedBtn").addEventListener("click", openFixedSheet);
   el("fixedClose").addEventListener("click", closeFixedSheet);
   el("fixedDim").addEventListener("click", closeFixedSheet);
+  // 시트 본문 클릭은 배경 클릭으로 취급하지 않습니다.
+  document.querySelector("#fixedSheet .sheet-body")
+    .addEventListener("click", (e) => e.stopPropagation());
   el("fixedSubmit").addEventListener("click", submitFixed);
   el("fixedMonth").addEventListener("change", async () => {
     try {
