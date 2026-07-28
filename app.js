@@ -44,6 +44,29 @@ const CATEGORY_TREE = {
   }
 };
 
+// 작성자 (엑셀 표의 7번째 열)
+const WRITERS = ["준우", "소히"];
+let currentWriter = localStorage.getItem("gagyebu_writer") || WRITERS[0];
+
+function setWriter(name) {
+  if (!WRITERS.includes(name)) return;
+  currentWriter = name;
+  localStorage.setItem("gagyebu_writer", name);
+  document.querySelectorAll(".who-btn").forEach((b) => {
+    const on = b.dataset.who === name;
+    b.classList.toggle("is-active", on);
+    b.setAttribute("aria-checked", String(on));
+  });
+}
+
+// 작성자를 CSS 클래스로 (준우 → who-junwoo)
+function writerClass(name) {
+  const w = norm(name);
+  if (w === "준우") return "who-junwoo";
+  if (w === "소히" || w === "소희") return "who-sohee";
+  return "";
+}
+
 const FIRST_PAGE_SIZE = 10;  // 처음 보여줄 건수
 const PAGE_SIZE = 20;        // "더 보기" 한 번에 추가할 건수
 
@@ -507,10 +530,10 @@ async function populateRecentMonths() {
 // 한 행이 검색어와 맞는지 — 분류·세부항목·메모·금액을 모두 훑습니다.
 function rowMatchesSearch(row, term) {
   if (!term) return true;
-  const [date, major, minor, detail, memo, amount] = row.values;
+  const [date, major, minor, detail, memo, amount, writer] = row.values;
   const hay = [
     toDateInput(date),
-    norm(major), norm(minor), norm(detail), norm(memo),
+    norm(major), norm(minor), norm(detail), norm(memo), norm(writer),
     String(Number(amount || 0)),                       // 15000 으로 검색
     Number(amount || 0).toLocaleString("ko-KR")        // 15,000 으로도 검색
   ].join(" ").toLowerCase();
@@ -543,13 +566,21 @@ function renderRows() {
   }
 
   for (const row of loadedRows) {
-    const [date, major, minor, detail, memo, amount] = row.values;
+    const [date, major, minor, detail, memo, amount, writer] = row.values;
     const li = document.createElement("li");
+    const wc = writerClass(writer);
+    if (wc) li.classList.add(wc);
     if (row.index === editingIndex) li.classList.add("is-editing");
 
     const dateEl = document.createElement("span");
     dateEl.className = "rdate";
     dateEl.textContent = toDateInput(date);
+    if (norm(writer)) {
+      const wb = document.createElement("span");
+      wb.className = "rwho " + wc;
+      wb.textContent = norm(writer);
+      dateEl.appendChild(wb);
+    }
 
     const catEl = document.createElement("span");
     catEl.className = "rcat";
@@ -598,9 +629,10 @@ function renderRows() {
 
 // ── 수정 모드 ──────────────────────────────────────────────
 function startEdit(row) {
-  const [date, major, minor, detail, memo, amount] = row.values;
+  const [date, major, minor, detail, memo, amount, writer] = row.values;
   editingIndex = row.index;
   editingOriginal = row.values.slice();
+  if (norm(writer)) setWriter(norm(writer) === "소희" ? "소히" : norm(writer));
 
   el("date").value = toDateInput(date);
   populateMajor(norm(major), norm(minor), norm(detail));
@@ -639,7 +671,8 @@ function formValues() {
     el("minor").value,
     el("detail").value,
     el("memo").value,
-    getAmountValue()
+    getAmountValue(),
+    currentWriter
   ];
 }
 
@@ -1191,6 +1224,223 @@ function renderSummary(st, range, cols) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 고정비 한번에 입력
+// ═══════════════════════════════════════════════════════════
+// 매달 비슷하게 나가는 고정비를 계획 시트에서 불러와 한 번에 넣습니다.
+const FIXED_MAJORS = ["고정비"];   // 대상 대분류
+
+let fixedItems = [];        // { minor, detail, plan, checked, already }
+let fixedWriter = null;
+
+function fixedMonthKey() {
+  return el("fixedMonth").value;   // "2026-07"
+}
+
+async function openFixedSheet() {
+  el("fixedSheet").hidden = false;
+  document.body.classList.add("sheet-open");
+
+  fixedWriter = currentWriter;
+  document.querySelectorAll("#fixedWho .who-btn").forEach((b) => {
+    const on = b.dataset.who === fixedWriter;
+    b.classList.toggle("is-active", on);
+    b.setAttribute("aria-checked", String(on));
+  });
+
+  const list = el("fixedList");
+  list.innerHTML = "<p class='fixed-loading'>불러오는 중...</p>";
+  el("fixedSummary").textContent = "";
+
+  try {
+    const st = await getStructure();
+
+    // 월 선택지 채우기 (시트에 있는 달만)
+    const sel = el("fixedMonth");
+    if (!sel.options.length) {
+      const months = Object.keys(st.monthCols).sort();
+      for (const m of months) {
+        const [y, mo] = m.split("-");
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = `${y}년 ${Number(mo)}월`;
+        sel.appendChild(opt);
+      }
+      const now = new Date();
+      const cur = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+      sel.value = st.monthCols[cur] ? cur : months[months.length - 1];
+    }
+
+    await loadFixedItems(st);
+  } catch (e) {
+    list.innerHTML = `<p class='fixed-loading'>불러오지 못했습니다: ${e.message}</p>`;
+  }
+}
+
+function closeFixedSheet() {
+  el("fixedSheet").hidden = true;
+  document.body.classList.remove("sheet-open");
+}
+
+async function loadFixedItems(st) {
+  const list = el("fixedList");
+  list.innerHTML = "<p class='fixed-loading'>불러오는 중...</p>";
+
+  const key = fixedMonthKey();
+  const cols = st.monthCols[key];
+  if (!cols) {
+    list.innerHTML = "<p class='fixed-loading'>이 달은 계획 시트에 없습니다.</p>";
+    fixedItems = [];
+    updateFixedSummary();
+    return;
+  }
+
+  const groups = st.groups.filter((g) => FIXED_MAJORS.includes(g.major));
+  const rows = groups.flatMap((g) => g.rows);
+  if (!rows.length) {
+    list.innerHTML = "<p class='fixed-loading'>고정비 항목을 찾지 못했습니다.</p>";
+    fixedItems = [];
+    updateFixedSummary();
+    return;
+  }
+
+  const fileId = await getFileId();
+
+  // 계획 금액 읽기 + 이미 입력된 내역 확인을 동시에
+  const [planRange, existing] = await Promise.all([
+    fetchSummaryRange(cols, rows.map((r) => r.row)),
+    graphFetch(`${tablePath(fileId, APP_CONFIG.tableName)}/rows`)
+  ]);
+
+  const already = new Set();
+  for (const r of (existing.value || [])) {
+    const v = (r.values && r.values[0]) || [];
+    if (!toDateInput(v[0]).startsWith(key)) continue;
+    already.add([norm(v[1]), norm(v[2]), norm(v[3])].join("|"));
+  }
+
+  fixedItems = rows.map((r) => {
+    const plan = Number(cellFromRange(planRange, cols[0], r.row) || 0);
+    const sig = ["고정비", r.minor, r.detail].join("|");
+    const dup = already.has(sig);
+    return {
+      minor: r.minor,
+      detail: r.detail,
+      plan,
+      amount: plan,
+      checked: !dup && plan > 0,   // 이미 넣었거나 계획이 0이면 기본 해제
+      already: dup
+    };
+  });
+
+  renderFixedList();
+}
+
+function renderFixedList() {
+  const list = el("fixedList");
+  list.innerHTML = "";
+
+  fixedItems.forEach((item, i) => {
+    const row = document.createElement("div");
+    row.className = "fixed-item" + (item.already ? " is-done" : "");
+
+    const label = document.createElement("label");
+    label.className = "fixed-check";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = item.checked;
+    cb.addEventListener("change", () => {
+      fixedItems[i].checked = cb.checked;
+      row.classList.toggle("is-on", cb.checked);
+      updateFixedSummary();
+    });
+
+    const nameBox = document.createElement("span");
+    nameBox.className = "fixed-name";
+    nameBox.innerHTML = `
+      <b>${item.detail}</b>
+      <em>${item.minor}</em>
+      ${item.already ? '<span class="fixed-done-tag">입력됨</span>' : ""}
+    `;
+
+    label.append(cb, nameBox);
+
+    const amtWrap = document.createElement("div");
+    amtWrap.className = "fixed-amt";
+    const amt = document.createElement("input");
+    amt.type = "text";
+    amt.inputMode = "numeric";
+    amt.value = item.amount ? item.amount.toLocaleString("ko-KR") : "";
+    amt.placeholder = "0";
+    amt.addEventListener("input", (e) => {
+      const digits = String(e.target.value).replace(/[^0-9]/g, "");
+      e.target.value = digits ? Number(digits).toLocaleString("ko-KR") : "";
+      fixedItems[i].amount = digits ? Number(digits) : 0;
+      updateFixedSummary();
+    });
+    const won = document.createElement("span");
+    won.textContent = "원";
+    amtWrap.append(amt, won);
+
+    row.append(label, amtWrap);
+    if (item.checked) row.classList.add("is-on");
+    list.appendChild(row);
+  });
+
+  updateFixedSummary();
+}
+
+function updateFixedSummary() {
+  const picked = fixedItems.filter((i) => i.checked && i.amount > 0);
+  const sum = picked.reduce((s, i) => s + i.amount, 0);
+  el("fixedSummary").innerHTML = picked.length
+    ? `<b>${picked.length}건</b> · ${fmtWon(sum)}`
+    : "선택한 항목이 없어요";
+  el("fixedSubmit").disabled = picked.length === 0;
+}
+
+async function submitFixed() {
+  const picked = fixedItems.filter((i) => i.checked && i.amount > 0);
+  if (!picked.length) return;
+
+  const btn = el("fixedSubmit");
+  btn.disabled = true;
+  btn.textContent = "저장하는 중...";
+
+  const key = fixedMonthKey();
+  const [y, m] = key.split("-");
+  // 그 달 1일로 기록합니다.
+  const dateStr = `${y}-${m}-01`;
+
+  try {
+    const fileId = await getFileId();
+    const values = picked.map((i) => [
+      dateStr, "고정비", i.minor, i.detail, "고정비 자동입력", i.amount, fixedWriter
+    ]);
+
+    // 표에 여러 행을 한 번에 넣습니다.
+    await graphFetch(`${tablePath(fileId, APP_CONFIG.tableName)}/rows/add`, {
+      method: "POST",
+      body: JSON.stringify({ values })
+    });
+    await recalc(fileId);
+
+    closeFixedSheet();
+    showToast("saved", `${picked.length}건 저장 완료!`);
+
+    allRowsCache = null;
+    calLoadedKey = null;
+    await loadRows(true);
+    populateRecentMonths();
+  } catch (e) {
+    alert("저장하지 못했습니다: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "선택 항목 저장";
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 달력 보기
 // ═══════════════════════════════════════════════════════════
 let calYear = null;
@@ -1396,11 +1646,13 @@ function renderCalDetail(totals) {
     <ul class="cal-detail-list">`;
 
   for (const r of info.items) {
-    const [, major, minor, detail, memo, amount] = r.values;
+    const [, major, minor, detail, memo, amount, writer] = r.values;
     const cat = [major, minor, detail].filter(Boolean).join(" · ");
+    const wc = writerClass(writer);
+    const wTag = norm(writer) ? `<span class="rwho ${wc}">${norm(writer)}</span>` : "";
     html += `
-      <li>
-        <span class="cd-cat">${cat}</span>
+      <li class="${wc}">
+        <span class="cd-cat">${cat}${wTag}</span>
         <span class="cd-amt">${fmtWon(amount)}</span>
         ${memo ? `<span class="cd-memo">${norm(memo)}</span>` : ""}
       </li>`;
@@ -1459,6 +1711,38 @@ async function init() {
   el("minor").addEventListener("change", () => populateDetail());
   el("entryForm").addEventListener("submit", handleSubmit);
   setupInstallButton();
+
+  document.querySelectorAll("#whoPick .who-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setWriter(btn.dataset.who));
+  });
+  setWriter(currentWriter);   // 마지막에 고른 사람을 기억합니다
+
+  // 고정비 한번에 입력
+  el("fixedBtn").addEventListener("click", openFixedSheet);
+  el("fixedClose").addEventListener("click", closeFixedSheet);
+  el("fixedDim").addEventListener("click", closeFixedSheet);
+  el("fixedSubmit").addEventListener("click", submitFixed);
+  el("fixedMonth").addEventListener("change", async () => {
+    try {
+      const st = await getStructure();
+      await loadFixedItems(st);
+    } catch (e) {
+      el("fixedList").innerHTML = `<p class='fixed-loading'>${e.message}</p>`;
+    }
+  });
+  document.querySelectorAll("#fixedWho .who-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      fixedWriter = btn.dataset.who;
+      document.querySelectorAll("#fixedWho .who-btn").forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("is-active", on);
+        b.setAttribute("aria-checked", String(on));
+      });
+    });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("fixedSheet").hidden) closeFixedSheet();
+  });
 
   // 금액 입력 중 천 단위 콤마를 실시간으로 적용합니다.
   el("amount").addEventListener("input", (e) => {
