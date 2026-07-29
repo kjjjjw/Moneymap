@@ -1484,3 +1484,81 @@ body.sheet-open { overflow: hidden; }
 }
 
 .sheet-submit:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+
+/* ═══════════════════════════════════════════════════════════
+   자주 쓰는 항목 (빠른 입력)
+   ═══════════════════════════════════════════════════════════ */
+.quick-box {
+  margin-bottom: 14px;
+}
+
+.quick-head {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 8px;
+}
+
+.quick-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+
+/* 가로 스크롤 — 칩이 많아도 한 줄 유지 */
+.quick-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 4px 6px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.quick-chips::-webkit-scrollbar { display: none; }
+
+.quick-chip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 10px 14px;
+  font-family: inherit;
+  text-align: left;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  cursor: pointer;
+  transition: all 0.16s ease;
+  box-shadow: var(--shadow-card);
+}
+
+.qc-name {
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.qc-sub {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.quick-chip:hover {
+  border-color: var(--violet);
+}
+
+.quick-chip:active { transform: scale(0.97); }
+
+.quick-chip.is-picked {
+  border-color: var(--violet);
+  background: var(--violet-soft);
+}
+
+.quick-chip.is-picked .qc-name { color: var(--violet); }
+.quick-chip.is-picked .qc-sub { color: var(--violet); opacity: 0.75; }

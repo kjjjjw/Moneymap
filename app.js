@@ -260,6 +260,7 @@ async function setEntryMode(mode) {
   allRowsCache = null;
   await loadRows(true);
   populateRecentMonths();
+  loadQuickItems(false);
 }
 
 // ── 캐릭터 토스트 ──────────────────────────────────────────
@@ -710,6 +711,7 @@ async function handleSubmit(e) {
     calLoadedKey = null;   // 달력도 다시 읽도록
     await loadRows(true);
     populateRecentMonths();
+    loadQuickItems(true);
   } catch (err) {
     showStatus(err.message, true);
   } finally {
@@ -1224,6 +1226,119 @@ function renderSummary(st, range, cols) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 자주 쓰는 항목 (빠른 입력)
+// ═══════════════════════════════════════════════════════════
+// 최근 기록에서 자주 등장한 분류 조합을 뽑아 한 번에 채웁니다.
+const QUICK_SCAN = 120;   // 최근 몇 건을 살펴볼지
+const QUICK_MAX = 6;      // 칩 최대 개수
+
+let quickCache = { expense: null, income: null };
+
+function quickSignature(v) {
+  return [norm(v[1]), norm(v[2]), norm(v[3])].join("|");
+}
+
+// 최근 것일수록 점수를 더 줍니다 (오래된 습관보다 요즘 습관이 중요)
+function buildQuickItems(rows) {
+  const recent = rows.slice(-QUICK_SCAN);
+  const score = new Map();
+
+  recent.forEach((r, i) => {
+    const v = r.values || [];
+    const detail = norm(v[3]);
+    if (!detail) return;
+    const sig = quickSignature(v);
+    // 뒤쪽(최근)일수록 1.0 → 앞쪽(과거)은 0.4까지 낮춥니다.
+    const w = 0.4 + 0.6 * (i / Math.max(1, recent.length - 1));
+    const cur = score.get(sig) || {
+      major: norm(v[1]), minor: norm(v[2]), detail,
+      count: 0, weight: 0, amounts: []
+    };
+    cur.count += 1;
+    cur.weight += w;
+    const amt = Number(v[5] || 0);
+    if (amt > 0) cur.amounts.push(amt);
+    score.set(sig, cur);
+  });
+
+  return Array.from(score.values())
+    .filter((x) => x.count >= 2)          // 한 번뿐인 건 제외
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, QUICK_MAX);
+}
+
+async function loadQuickItems(force) {
+  const box = el("quickBox");
+  const mode = entryMode;
+
+  if (!force && quickCache[mode]) {
+    renderQuickChips(quickCache[mode]);
+    return;
+  }
+
+  try {
+    const fileId = await getFileId();
+    const data = await graphFetch(`${tablePath(fileId, currentTableName())}/rows`);
+    const rows = (data.value || []).map((r, i) => ({
+      index: typeof r.index === "number" ? r.index : i,
+      values: (r.values && r.values[0]) || []
+    }));
+    const items = buildQuickItems(rows);
+    quickCache[mode] = items;
+    if (mode === entryMode) renderQuickChips(items);
+  } catch (e) {
+    box.hidden = true;   // 실패해도 조용히 숨깁니다 (부가 기능이므로)
+  }
+}
+
+function renderQuickChips(items) {
+  const box = el("quickBox");
+  const wrap = el("quickChips");
+
+  if (!items || !items.length) { box.hidden = true; return; }
+  box.hidden = false;
+  wrap.innerHTML = "";
+
+  for (const it of items) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "quick-chip";
+
+    // "준우"처럼 세부항목만으로 뜻이 안 통하면 소분류를 앞에 세웁니다.
+    const vague = it.minor && (it.detail === "준우" || it.detail === "소희" || it.detail === "소히");
+    const name = document.createElement("span");
+    name.className = "qc-name";
+    name.textContent = vague ? `${it.minor} · ${it.detail}` : it.detail;
+
+    const sub = document.createElement("span");
+    sub.className = "qc-sub";
+    sub.textContent = vague ? it.major : (it.minor || it.major);
+
+    chip.append(name, sub);
+    chip.title = [it.major, it.minor, it.detail].filter(Boolean).join(" · ");
+
+    chip.addEventListener("click", () => applyQuickItem(it, chip));
+    wrap.appendChild(chip);
+  }
+}
+
+function applyQuickItem(it, chip) {
+  // 수정 중이면 헷갈리니 먼저 빠져나옵니다.
+  if (editingIndex !== null) cancelEdit();
+
+  populateMajor(it.major, it.minor, it.detail);
+
+  // 눌린 표시를 잠깐 보여줍니다.
+  document.querySelectorAll(".quick-chip").forEach((c) => c.classList.remove("is-picked"));
+  if (chip) {
+    chip.classList.add("is-picked");
+    setTimeout(() => chip.classList.remove("is-picked"), 900);
+  }
+
+  el("amount").focus();
+}
+
+// ═══════════════════════════════════════════════════════════
 // 고정비 한번에 입력
 // ═══════════════════════════════════════════════════════════
 // 매달 비슷하게 나가는 고정비를 계획 시트에서 불러와 한 번에 넣습니다.
@@ -1434,6 +1549,7 @@ async function submitFixed() {
     calLoadedKey = null;
     await loadRows(true);
     populateRecentMonths();
+    loadQuickItems(true);
   } catch (e) {
     alert("저장하지 못했습니다: " + e.message);
   } finally {
@@ -1698,6 +1814,7 @@ function showApp() {
   });
   loadRows(true);
   populateRecentMonths();
+  loadQuickItems(false);
 }
 
 function showLogin() {
