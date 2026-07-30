@@ -148,14 +148,17 @@ function sameRow(a, b) {
 function fillSelect(sel, items, selected) {
   sel.innerHTML = "";
   const list = items.slice();
-  if (selected && !list.includes(selected)) list.push(selected); // 표에만 있는 옛 항목 보존
+  // 표에만 있는 옛 항목도 고를 수 있게 남겨두되, 목록에 없는 값임을 표시합니다.
+  const isForeign = selected && !list.includes(selected);
+  if (isForeign) list.push(selected);
   for (const item of list) {
     const opt = document.createElement("option");
     opt.value = item;
-    opt.textContent = item;
+    opt.textContent = (isForeign && item === selected) ? `${item} (목록에 없음)` : item;
     sel.appendChild(opt);
   }
   if (selected) sel.value = selected;
+  sel.classList.toggle("is-foreign", Boolean(isForeign));
 }
 
 // ── 입력 모드: 지출 / 소득 ──────────────────────────────────
@@ -377,17 +380,6 @@ async function recalc(fileId) {
   }
 }
 
-async function getRowCount(fileId, tableName) {
-  try {
-    const range = await graphFetch(`${tablePath(fileId, tableName)}/dataBodyRange?$select=rowCount`);
-    if (range && typeof range.rowCount === "number") return range.rowCount;
-  } catch (e) {
-    // 아래 폴백으로 진행
-  }
-  const all = await graphFetch(`${tablePath(fileId, tableName)}/rows?$select=index`);
-  return (all.value || []).length;
-}
-
 // ── 쓰기 ───────────────────────────────────────────────────
 async function addRow(tableName, values) {
   const fileId = await getFileId();
@@ -426,6 +418,26 @@ async function deleteRow(tableName, index, original) {
 }
 
 // ── 목록 읽기 (뒤에서부터 20개씩) ──────────────────────────
+// 사용한 날짜(내역의 날짜 칸) 기준 최신순으로 정렬합니다.
+// 같은 날이면 나중에 입력한 것이 위로 옵니다.
+function sortByUsedDate(rows) {
+  return rows.slice().sort((a, b) => {
+    const da = toDateInput(a.values[0]);
+    const db = toDateInput(b.values[0]);
+    if (da !== db) return db < da ? -1 : 1;   // 날짜 내림차순
+    return b.index - a.index;                  // 같은 날 → 입력 순서 역순
+  });
+}
+
+// 표 전체를 받아 캐시합니다. 날짜순 정렬이 필요하므로 전체가 있어야 합니다.
+async function fetchAllRows(fileId, tableName) {
+  const data = await graphFetch(`${tablePath(fileId, tableName)}/rows`);
+  return (data.value || []).map((r, i) => ({
+    index: typeof r.index === "number" ? r.index : i,
+    values: (r.values && r.values[0]) || []
+  }));
+}
+
 async function loadRows(reset) {
   if (isLoading) return;
   isLoading = true;
@@ -437,53 +449,24 @@ async function loadRows(reset) {
   try {
     const fileId = await getFileId();
 
-    // 월 필터나 검색이 걸린 경우: 해당 데이터가 표 어디에 있을지 알 수 없으므로
-    // 전체를 한 번 받아 클라이언트에서 거릅니다.
-    if (recentMonthFilter || recentSearchTerm) {
-      if (reset || allRowsCache === null) {
-        list.innerHTML = "<li class='muted'>불러오는 중...</li>";
-        el("listMeta").textContent = "";
-        const data = await graphFetch(`${tablePath(fileId, tableName)}/rows`);
-        allRowsCache = (data.value || []).map((r, i) => ({
-          index: typeof r.index === "number" ? r.index : i,
-          values: (r.values && r.values[0]) || []
-        }));
-      }
-      const filtered = allRowsCache
-        .filter((r) => !recentMonthFilter || toDateInput(r.values[0]).startsWith(recentMonthFilter))
-        .filter((r) => rowMatchesSearch(r, recentSearchTerm))
-        .reverse();
-      totalRows = filtered.length;
-      if (reset) shownCount = FIRST_PAGE_SIZE;
-      else shownCount += PAGE_SIZE;
-      loadedRows = filtered.slice(0, shownCount);
-      renderRows();
-      return;
-    }
-
-    // 전체 기간: 표 뒤쪽부터 필요한 만큼만 받아옵니다.
-    if (reset) {
-      loadedRows = [];
-      allRowsCache = null;
+    if (reset || allRowsCache === null) {
       list.innerHTML = "<li class='muted'>불러오는 중...</li>";
       el("listMeta").textContent = "";
-      totalRows = await getRowCount(fileId, tableName);
+      allRowsCache = await fetchAllRows(fileId, tableName);
     } else {
       moreBtn.textContent = "불러오는 중...";
     }
 
-    const remaining = totalRows - loadedRows.length;
-    if (remaining > 0) {
-      const pageSize = loadedRows.length === 0 ? FIRST_PAGE_SIZE : PAGE_SIZE;
-      const top = Math.min(pageSize, remaining);
-      const skip = remaining - top;
-      const data = await graphFetch(`${tablePath(fileId, tableName)}/rows?$top=${top}&$skip=${skip}`);
-      const batch = (data.value || []).map((r, i) => ({
-        index: typeof r.index === "number" ? r.index : skip + i,
-        values: (r.values && r.values[0]) || []
-      }));
-      loadedRows = loadedRows.concat(batch.reverse()); // 최신이 위로
-    }
+    const filtered = sortByUsedDate(
+      allRowsCache
+        .filter((r) => !recentMonthFilter || toDateInput(r.values[0]).startsWith(recentMonthFilter))
+        .filter((r) => rowMatchesSearch(r, recentSearchTerm))
+    );
+
+    totalRows = filtered.length;
+    if (reset) shownCount = FIRST_PAGE_SIZE;
+    else shownCount += PAGE_SIZE;
+    loadedRows = filtered.slice(0, shownCount);
     renderRows();
   } catch (e) {
     if (reset) el("recentList").innerHTML = "";
@@ -495,18 +478,15 @@ async function loadRows(reset) {
   }
 }
 
-// 표 전체를 훑어 데이터가 있는 월 목록을 만듭니다.
+// 데이터가 있는 월 목록을 만듭니다. loadRows가 받아둔 캐시를 재사용합니다.
 async function populateRecentMonths() {
   const sel = el("recentMonth");
   const keep = sel.value;
   try {
-    const fileId = await getFileId();
-    const tableName = currentTableName();
-    const data = await graphFetch(`${tablePath(fileId, tableName)}/rows`);
-    allRowsCache = (data.value || []).map((r, i) => ({
-      index: typeof r.index === "number" ? r.index : i,
-      values: (r.values && r.values[0]) || []
-    }));
+    if (allRowsCache === null) {
+      const fileId = await getFileId();
+      allRowsCache = await fetchAllRows(fileId, currentTableName());
+    }
 
     const months = new Set();
     for (const r of allRowsCache) {
@@ -528,7 +508,6 @@ async function populateRecentMonths() {
   }
 }
 
-// 한 행이 검색어와 맞는지 — 분류·세부항목·메모·금액을 모두 훑습니다.
 function rowMatchesSearch(row, term) {
   if (!term) return true;
   const [date, major, minor, detail, memo, amount, writer] = row.values;
@@ -665,6 +644,33 @@ function cancelEdit() {
   renderRows();
 }
 
+// 분류 조합이 실제로 존재하는지 확인합니다.
+// (브라우저 폼 복원이나 옛 데이터 때문에 어긋난 조합이 저장되는 것을 막습니다)
+function validateCategory() {
+  const tree = currentCategoryTree();
+  const major = el("major").value;
+  const minor = el("minor").value;
+  const detail = el("detail").value;
+
+  if (!tree[major]) return `대분류 "${major}"를 찾을 수 없습니다.`;
+
+  const needsMinor = minorFieldNeeded(tree, major);
+  if (needsMinor) {
+    if (!tree[major][minor]) {
+      return `"${major}" 아래에 "${minor}" 소분류가 없습니다. 분류를 다시 선택해주세요.`;
+    }
+    if (!tree[major][minor].includes(detail)) {
+      return `"${major} · ${minor}" 아래에 "${detail}" 항목이 없습니다. 분류를 다시 선택해주세요.`;
+    }
+  } else {
+    const details = tree[major][NO_MINOR] || [];
+    if (!details.includes(detail)) {
+      return `"${major}" 아래에 "${detail}" 항목이 없습니다. 분류를 다시 선택해주세요.`;
+    }
+  }
+  return null;
+}
+
 function formValues() {
   return [
     el("date").value,
@@ -684,6 +690,14 @@ async function handleSubmit(e) {
   if (getAmountValue() <= 0) {
     showStatus("금액을 입력하세요.", true);
     el("amount").focus();
+    return;
+  }
+
+  // 분류 조합이 어긋나면 계획 시트의 SUMIFS가 집계하지 못하므로 미리 막습니다.
+  const catError = validateCategory();
+  if (catError) {
+    showStatus(catError, true);
+    el("major").focus();
     return;
   }
 

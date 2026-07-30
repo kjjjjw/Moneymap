@@ -1562,3 +1562,9 @@ body.sheet-open { overflow: hidden; }
 
 .quick-chip.is-picked .qc-name { color: var(--violet); }
 .quick-chip.is-picked .qc-sub { color: var(--violet); opacity: 0.75; }
+
+/* 분류 트리에 없는 값이 선택된 경우 */
+select.is-foreign {
+  border-color: var(--warn);
+  color: var(--warn);
+}
