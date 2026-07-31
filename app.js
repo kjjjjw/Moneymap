@@ -729,6 +729,7 @@ async function handleSubmit(e) {
     populateRecentMonths();
     loadQuickItems(true);
     updateItemStatus();
+    loadMonthCard();
   } catch (err) {
     showStatus(err.message, true);
   } finally {
@@ -753,6 +754,7 @@ async function handleDelete(row) {
     await loadRows(true); // 삭제하면 뒤쪽 행 index가 밀리므로 전체를 다시 읽습니다
     populateRecentMonths();
     updateItemStatus();
+    loadMonthCard();
   } catch (err) {
     showStatus(err.message, true);
   }
@@ -1245,6 +1247,90 @@ function renderSummary(st, range, cols) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 이번 달 지출 요약 카드
+// ═══════════════════════════════════════════════════════════
+// 저축·투자를 뺀 순수 지출(고정비+생활비+비정기)만 봅니다.
+const SPEND_MAJORS = ["고정비", "생활비", "비정기 지출"];
+
+// 이번 달 남은 날짜 (오늘 포함)
+function daysLeftInMonth() {
+  const now = new Date();
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return last - now.getDate() + 1;
+}
+
+async function loadMonthCard() {
+  const card = el("monthCard");
+  try {
+    const st = await getStructure();
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth() + 1;
+    const ym = `${y}-${String(m).padStart(2, "0")}`;
+    const cols = columnsFor(st, "month", y, m);
+    if (!cols) { card.hidden = true; return; }
+
+    if (!statusCache[ym]) {
+      const allRows = st.groups.flatMap((g) => g.rows).map((r) => r.row);
+      statusCache[ym] = await fetchSummaryRange(cols, allRows);
+    }
+    const range = statusCache[ym];
+
+    let plan = 0, actual = 0;
+    for (const g of st.groups) {
+      if (!SPEND_MAJORS.includes(g.major)) continue;
+      for (const r of g.rows) {
+        plan += Number(cellFromRange(range, cols[0], r.row) || 0);
+        actual += Number(cellFromRange(range, cols[1], r.row) || 0);
+      }
+    }
+    renderMonthCard(m, plan, actual);
+  } catch (e) {
+    card.hidden = true;   // 부가 정보이므로 조용히 숨깁니다
+  }
+}
+
+function renderMonthCard(month, plan, actual) {
+  const card = el("monthCard");
+  if (plan <= 0 && actual <= 0) { card.hidden = true; return; }
+
+  const pct = plan > 0 ? Math.round((actual / plan) * 100) : 0;
+  const left = plan - actual;
+  const days = daysLeftInMonth();
+
+  // 지출은 적게 쓸수록 좋습니다.
+  const tone = plan <= 0 ? "none" : (pct > 100 ? "bad" : (pct >= 80 ? "warn" : "good"));
+
+  const fill = Math.min(100, pct);
+  const over = pct > 100 ? Math.min(100, pct - 100) : 0;
+
+  const leftLabel = plan <= 0
+    ? "계획 없음"
+    : (left >= 0 ? `${shortWon(left)}원 남음` : `${shortWon(-left)}원 초과`);
+
+  card.hidden = false;
+  card.className = `month-card tone-${tone}`;
+  card.innerHTML = `
+    <div class="mc-top">
+      <span class="mc-title">${month}월 지출</span>
+      <span class="mc-days">${days}일 남음</span>
+    </div>
+    <div class="mc-main">
+      <span class="mc-amt">${shortWon(actual)}</span>
+      <span class="mc-plan">/ 계획 ${shortWon(plan)}</span>
+    </div>
+    <div class="mc-bar">
+      <span class="mc-fill" style="width:${fill}%"></span>
+      ${over ? `<span class="mc-over" style="width:${over}%"></span>` : ""}
+    </div>
+    <div class="mc-foot">
+      <span class="mc-left">${leftLabel}</span>
+      ${plan > 0 ? `<span class="mc-pct">${pct}%</span>` : ""}
+    </div>
+  `;
+  card.title = `실적 ${fmtWon(actual)} · 계획 ${fmtWon(plan)}`;
+}
+
+// ═══════════════════════════════════════════════════════════
 // 선택한 분류의 이번 달 계획 대비 실적 (라벨 옆 간략 표시)
 // ═══════════════════════════════════════════════════════════
 let statusCache = {};
@@ -1695,6 +1781,8 @@ async function submitFixed() {
     await loadRows(true);
     populateRecentMonths();
     loadQuickItems(true);
+    updateItemStatus();
+    loadMonthCard();
   } catch (e) {
     alert("저장하지 못했습니다: " + e.message);
   } finally {
@@ -1961,6 +2049,7 @@ function showApp() {
   populateRecentMonths();
   loadQuickItems(false);
   updateItemStatus();
+  loadMonthCard();
 }
 
 function showLogin() {

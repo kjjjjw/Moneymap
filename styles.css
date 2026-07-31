@@ -1619,3 +1619,121 @@ select.is-foreign {
 @media (max-width: 360px) {
   .fs-fig { display: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   이번 달 지출 요약 카드
+   ═══════════════════════════════════════════════════════════ */
+.month-card {
+  background: var(--card);
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-card);
+  animation: mcIn 0.25s ease;
+}
+
+@keyframes mcIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.mc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.mc-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--ink-3);
+  letter-spacing: 0.01em;
+}
+
+.mc-days {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink-3);
+}
+
+.mc-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.mc-amt {
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-plan {
+  font-size: 0.9rem;
+  color: var(--ink-3);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 5px;
+  background: var(--track);
+  margin-bottom: 11px;
+}
+
+.mc-fill {
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--violet-2), var(--violet));
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mc-over {
+  height: 100%;
+  margin-left: 2px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--bad), #a83630);
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.month-card.tone-bad .mc-fill { border-radius: 5px 0 0 5px; }
+
+.mc-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mc-left {
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-pct {
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.month-card.tone-good .mc-left { color: var(--good); }
+.month-card.tone-good .mc-pct  { background: var(--good-soft); color: var(--good); }
+
+.month-card.tone-warn .mc-left { color: var(--warn); }
+.month-card.tone-warn .mc-pct  { background: var(--warn-soft); color: var(--warn); }
+
+.month-card.tone-bad  .mc-left { color: var(--bad); }
+.month-card.tone-bad  .mc-pct  { background: var(--bad-soft); color: var(--bad); }
+
+.month-card.tone-none .mc-left { color: var(--ink-3); }
