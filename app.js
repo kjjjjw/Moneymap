@@ -225,6 +225,7 @@ function populateDetail(detail) {
   const major = el("major").value;
   const minor = el("minor").value;
   fillSelect(el("detail"), (tree[major] || {})[minor] || [], detail);
+  updateItemStatus();
 }
 
 async function ensureIncomeTree() {
@@ -723,9 +724,11 @@ async function handleSubmit(e) {
     }
     allRowsCache = null;
     calLoadedKey = null;   // 달력도 다시 읽도록
+    clearStatusCache();    // 실적이 바뀌었으니 항목 현황도 새로
     await loadRows(true);
     populateRecentMonths();
     loadQuickItems(true);
+    updateItemStatus();
   } catch (err) {
     showStatus(err.message, true);
   } finally {
@@ -746,8 +749,10 @@ async function handleDelete(row) {
     showToast("deleted", "삭제했어요");
     allRowsCache = null;
     calLoadedKey = null;   // 달력도 다시 읽도록
+    clearStatusCache();
     await loadRows(true); // 삭제하면 뒤쪽 행 index가 밀리므로 전체를 다시 읽습니다
     populateRecentMonths();
+    updateItemStatus();
   } catch (err) {
     showStatus(err.message, true);
   }
@@ -1240,6 +1245,131 @@ function renderSummary(st, range, cols) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 선택한 분류의 이번 달 계획 대비 실적 (라벨 옆 간략 표시)
+// ═══════════════════════════════════════════════════════════
+let statusCache = {};
+let statusToken = 0;
+
+function statusMonthKey() {
+  const d = el("date").value;
+  return /^\d{4}-\d{2}/.test(d) ? d.slice(0, 7) : null;
+}
+
+// 좁은 자리에 넣기 위해 만 단위로 줄입니다 (164,340 → 16.4만)
+function shortWon(n) {
+  const v = Math.round(Number(n || 0));
+  const sign = v < 0 ? "-" : "";
+  const a = Math.abs(v);
+  if (a === 0) return "0";
+  if (a >= 100000000) return sign + (a / 100000000).toFixed(1).replace(/\.0$/, "") + "억";
+  if (a >= 10000) {
+    const man = a / 10000;
+    return sign + (man >= 100 ? Math.round(man) : man.toFixed(1).replace(/\.0$/, "")) + "만";
+  }
+  return sign + a.toLocaleString("ko-KR");
+}
+
+// 진행률 도넛 (작은 원형 게이지)
+function donutSVG(pct, tone) {
+  const p = Math.max(0, Math.min(100, pct));
+  const r = 7, C = 2 * Math.PI * r;
+  const dash = (p / 100) * C;
+  return `<svg class="fs-donut ${tone}" viewBox="0 0 20 20" aria-hidden="true">
+    <circle cx="10" cy="10" r="${r}" class="fs-track"/>
+    <circle cx="10" cy="10" r="${r}" class="fs-arc"
+      stroke-dasharray="${dash.toFixed(2)} ${(C - dash).toFixed(2)}"
+      transform="rotate(-90 10 10)"/>
+  </svg>`;
+}
+
+function toneOf(plan, actual, isIncome) {
+  if (plan <= 0) return actual > 0 ? "bad" : "none";
+  const pct = (actual / plan) * 100;
+  if (isIncome) return pct >= 100 ? "good" : (pct >= 70 ? "warn" : "bad");
+  return pct > 100 ? "bad" : (pct >= 80 ? "warn" : "good");
+}
+
+function paintStatus(elm, plan, actual, isIncome) {
+  if (!elm) return;
+  if (plan <= 0 && actual <= 0) { elm.hidden = true; return; }
+
+  const pct = plan > 0 ? Math.round((actual / plan) * 100) : 0;
+  const left = plan - actual;
+  const tone = toneOf(plan, actual, isIncome);
+
+  const leftLabel = plan <= 0
+    ? "계획없음"
+    : (left >= 0 ? `잔액 ${shortWon(left)}` : `초과 ${shortWon(-left)}`);
+
+  elm.hidden = false;
+  elm.className = `fs tone-${tone}`;
+  elm.innerHTML = `${donutSVG(pct, tone)}<span class="fs-fig">${shortWon(actual)}/${shortWon(plan)}</span><span class="fs-left">${leftLabel}</span>`;
+  elm.title = `계획 ${fmtWon(plan)} · 실적 ${fmtWon(actual)}${plan > 0 ? ` (${pct}%)` : ""}`;
+}
+
+async function updateItemStatus() {
+  const major = el("major").value;
+  const minor = el("minor").value;
+  const detail = el("detail").value;
+  const ym = statusMonthKey();
+
+  const boxes = [el("stMajor"), el("stMinor"), el("stDetail")];
+  if (!major || !ym) { boxes.forEach((b) => b && (b.hidden = true)); return; }
+
+  const my = ++statusToken;
+  try {
+    const st = await getStructure();
+    const group = st.groups.find((g) => g.major === major);
+    if (!group) { boxes.forEach((b) => b && (b.hidden = true)); return; }
+
+    const [y, m] = ym.split("-").map(Number);
+    const cols = columnsFor(st, "month", y, m);
+    if (!cols) { boxes.forEach((b) => b && (b.hidden = true)); return; }
+
+    if (!statusCache[ym]) {
+      const allRows = st.groups.flatMap((g) => g.rows).map((r) => r.row);
+      statusCache[ym] = await fetchSummaryRange(cols, allRows);
+    }
+    if (my !== statusToken) return;
+
+    const range = statusCache[ym];
+    const isIncome = INCOME_MAJORS.includes(major);
+    const val = (row, ci) => Number(cellFromRange(range, cols[ci], row) || 0);
+
+    // 대분류: 그룹 전체 합
+    let gPlan = 0, gActual = 0;
+    for (const r of group.rows) { gPlan += val(r.row, 0); gActual += val(r.row, 1); }
+    paintStatus(el("stMajor"), gPlan, gActual, isIncome);
+
+    // 소분류: 시트에 소계 행이 없으므로 해당 소분류의 세부항목을 합산합니다.
+    const needsMinor = minorFieldNeeded(currentCategoryTree(), major);
+    if (needsMinor && minor) {
+      let mPlan = 0, mActual = 0;
+      for (const r of group.rows) {
+        if (r.minor !== minor) continue;
+        mPlan += val(r.row, 0); mActual += val(r.row, 1);
+      }
+      paintStatus(el("stMinor"), mPlan, mActual, isIncome);
+    } else if (el("stMinor")) {
+      el("stMinor").hidden = true;
+    }
+
+    // 세부항목: 해당 행 하나
+    const target = group.rows.find(
+      (r) => r.detail === detail && (!needsMinor || r.minor === minor)
+    );
+    if (target) paintStatus(el("stDetail"), val(target.row, 0), val(target.row, 1), isIncome);
+    else if (el("stDetail")) el("stDetail").hidden = true;
+  } catch (e) {
+    boxes.forEach((b) => b && (b.hidden = true));
+  }
+}
+
+function clearStatusCache() {
+  statusCache = {};
+}
+
+// ═══════════════════════════════════════════════════════════
 // 자주 쓰는 항목 (빠른 입력)
 // ═══════════════════════════════════════════════════════════
 // 최근 기록에서 자주 등장한 분류 조합을 뽑아 한 번에 채웁니다.
@@ -1561,6 +1691,7 @@ async function submitFixed() {
 
     allRowsCache = null;
     calLoadedKey = null;
+    clearStatusCache();
     await loadRows(true);
     populateRecentMonths();
     loadQuickItems(true);
@@ -1829,6 +1960,7 @@ function showApp() {
   loadRows(true);
   populateRecentMonths();
   loadQuickItems(false);
+  updateItemStatus();
 }
 
 function showLogin() {
@@ -1842,6 +1974,8 @@ async function init() {
   populateMajor();
   el("major").addEventListener("change", () => populateMinor());
   el("minor").addEventListener("change", () => populateDetail());
+  el("detail").addEventListener("change", () => updateItemStatus());
+  el("date").addEventListener("change", () => updateItemStatus());
   el("entryForm").addEventListener("submit", handleSubmit);
   setupInstallButton();
 

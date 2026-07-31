@@ -243,6 +243,13 @@ label {
   letter-spacing: 0.01em;
 }
 
+/* 라벨 오른쪽에 현황을 붙이기 위한 배치 (.field 안의 라벨만) */
+.field > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 input, select {
   font-family: inherit;
   font-size: 1rem;
@@ -1567,4 +1574,48 @@ body.sheet-open { overflow: hidden; }
 select.is-foreign {
   border-color: var(--warn);
   color: var(--warn);
+}
+
+
+
+
+/* ═══════════════════════════════════════════════════════════
+   라벨 옆 간략 현황 (도넛 + 금액)
+   ═══════════════════════════════════════════════════════════ */
+.fs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  animation: fsIn 0.18s ease;
+}
+
+@keyframes fsIn { from { opacity: 0; } to { opacity: 1; } }
+
+.fs-donut { width: 15px; height: 15px; flex: 0 0 auto; }
+.fs-track { fill: none; stroke: var(--track); stroke-width: 4.5; }
+.fs-arc   { fill: none; stroke-width: 4.5; stroke-linecap: round; transition: stroke-dasharray 0.4s ease; }
+
+.fs-donut.good .fs-arc { stroke: var(--good); }
+.fs-donut.warn .fs-arc { stroke: var(--warn); }
+.fs-donut.bad  .fs-arc { stroke: var(--bad); }
+.fs-donut.none .fs-arc { stroke: var(--ink-3); }
+
+.fs-fig { color: var(--ink-2); font-weight: 600; }
+.fs-left { font-weight: 800; }
+
+.fs.tone-good .fs-left { color: var(--good); }
+.fs.tone-warn .fs-left { color: var(--warn); }
+.fs.tone-bad  .fs-left { color: var(--bad); }
+.fs.tone-none .fs-left { color: var(--ink-3); }
+
+/* 아주 좁은 화면에서는 금액 비교를 감춰 줄바꿈을 막습니다 */
+@media (max-width: 360px) {
+  .fs-fig { display: none; }
 }
