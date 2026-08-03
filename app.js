@@ -110,7 +110,7 @@ function formatAmountInput(str) {
 }
 
 function setAmountValue(n) {
-  const num = Number(n || 0);
+  const num = Math.abs(Number(n || 0));   // 부호는 입금/인출 토글로 다룹니다
   el("amount").value = num ? num.toLocaleString("ko-KR") : "";
 }
 
@@ -218,6 +218,7 @@ function populateMinor(minor, detail) {
     fillSelect(el("minor"), [NO_MINOR], NO_MINOR);
   }
   populateDetail(detail);
+  syncFlowPick();
 }
 
 function populateDetail(detail) {
@@ -258,6 +259,7 @@ async function setEntryMode(mode) {
   showStatus("", false);
   recentMonthFilter = "";
   el("recentMonth").value = "";
+  setFlow("in");
   recentSearchTerm = "";
   el("recentSearch").value = "";
   el("searchClear").hidden = true;
@@ -569,7 +571,9 @@ function renderRows() {
 
     const amtEl = document.createElement("span");
     amtEl.className = "ramt";
-    amtEl.textContent = Number(amount || 0).toLocaleString("ko-KR") + "원";
+    const amtNum = Number(amount || 0);
+    amtEl.textContent = amtNum.toLocaleString("ko-KR") + "원";
+    if (amtNum < 0) amtEl.classList.add("is-out");   // 인출은 눈에 띄게
 
     li.append(dateEl, catEl, amtEl);
 
@@ -618,7 +622,10 @@ function startEdit(row) {
   el("date").value = toDateInput(date);
   populateMajor(norm(major), norm(minor), norm(detail));
   el("memo").value = norm(memo);
-  setAmountValue(amount);
+  const amt = Number(amount || 0);
+  setAmountValue(Math.abs(amt));
+  syncFlowPick();
+  setFlow(amt < 0 ? "out" : "in");
 
   el("editBanner").hidden = false;
   el("editBanner").textContent = `${toDateInput(date)} · ${norm(detail)} 내역을 수정하는 중`;
@@ -679,7 +686,7 @@ function formValues() {
     el("minor").value,
     el("detail").value,
     el("memo").value,
-    getAmountValue(),
+    (flowPickAvailable() && amountFlow === "out") ? -getAmountValue() : getAmountValue(),
     currentWriter
   ];
 }
@@ -1393,6 +1400,31 @@ function paintStatus(elm, plan, actual, isIncome) {
   elm.title = `계획 ${fmtWon(plan)} · 실적 ${fmtWon(actual)}${plan > 0 ? ` (${pct}%)` : ""}`;
 }
 
+// ── 저축·투자의 입금 / 인출 ────────────────────────────────
+// 비상금에서 꺼내 쓰는 것처럼, 쌓아둔 돈을 헐어 쓰는 경우를 음수로 기록합니다.
+let amountFlow = "in";   // "in" = 입금(+), "out" = 인출(−)
+
+// 저축·투자 항목에서만 인출을 고를 수 있게 합니다.
+function flowPickAvailable() {
+  return entryMode === "income" && el("major").value === "저축·투자";
+}
+
+function setFlow(dir) {
+  amountFlow = (dir === "out") ? "out" : "in";
+  document.querySelectorAll(".flow-btn").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.flow === amountFlow);
+  });
+  el("amount").classList.toggle("is-out", amountFlow === "out");
+}
+
+function syncFlowPick() {
+  const box = el("flowPick");
+  if (!box) return;
+  const avail = flowPickAvailable();
+  box.hidden = !avail;
+  if (!avail) setFlow("in");   // 대상이 아니면 항상 입금으로
+}
+
 // 계획 금액을 자동으로 채워줄 항목
 // 매달 금액이 달라져 시트를 확인해야 하는 ISA 두 계좌만 대상으로 합니다.
 const AUTOFILL_DETAILS = ["소희 ISA", "준우 ISA"];
@@ -1406,6 +1438,7 @@ function isAutofillTarget(major, detail) {
 function autofillPlanAmount(plan) {
   if (!plan || plan <= 0) return;
   if (editingIndex !== null) return;        // 수정 중에는 원래 금액을 지키기
+  if (amountFlow === "out") return;         // 인출 중에는 계획 금액을 넣지 않습니다
   if (getAmountValue() > 0) return;         // 이미 입력한 값이 있으면 그대로
 
   setAmountValue(plan);
@@ -2091,6 +2124,9 @@ async function init() {
   el("major").addEventListener("change", () => populateMinor());
   el("minor").addEventListener("change", () => populateDetail());
   el("detail").addEventListener("change", () => updateItemStatus());
+  document.querySelectorAll(".flow-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setFlow(btn.dataset.flow));
+  });
   el("date").addEventListener("change", () => updateItemStatus());
   el("entryForm").addEventListener("submit", handleSubmit);
   setupInstallButton();

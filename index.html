@@ -118,7 +118,10 @@
         </div>
 
         <div class="field">
-          <label for="amount" id="amountLabel">이용금액 (원)</label>
+          <label for="amount" id="amountLabel">이용금액 (원)<span id="flowPick" class="flow-pick" hidden>
+            <button type="button" class="flow-btn is-active" data-flow="in">입금</button>
+            <button type="button" class="flow-btn" data-flow="out">인출</button>
+          </span></label>
           <input type="text" id="amount" inputmode="numeric" autocomplete="off" required placeholder="예: 15,000">
         </div>
 
