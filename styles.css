@@ -1737,3 +1737,16 @@ select.is-foreign {
 .month-card.tone-bad  .mc-pct  { background: var(--bad-soft); color: var(--bad); }
 
 .month-card.tone-none .mc-left { color: var(--ink-3); }
+
+/* 계획 금액이 자동으로 채워졌을 때 잠깐 강조 */
+#amount.is-autofilled {
+  border-color: var(--violet);
+  background: var(--violet-soft);
+  animation: autofillPulse 1.2s ease;
+}
+
+@keyframes autofillPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(89,69,206,0.35); }
+  55%  { box-shadow: 0 0 0 7px rgba(89,69,206,0); }
+  100% { box-shadow: 0 0 0 0 rgba(89,69,206,0); }
+}

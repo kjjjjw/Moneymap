@@ -1393,6 +1393,28 @@ function paintStatus(elm, plan, actual, isIncome) {
   elm.title = `계획 ${fmtWon(plan)} · 실적 ${fmtWon(actual)}${plan > 0 ? ` (${pct}%)` : ""}`;
 }
 
+// 계획 금액을 자동으로 채워줄 항목
+// 매달 금액이 달라져 시트를 확인해야 하는 ISA 두 계좌만 대상으로 합니다.
+const AUTOFILL_DETAILS = ["소희 ISA", "준우 ISA"];
+
+function isAutofillTarget(major, detail) {
+  return INCOME_MAJORS.includes(major) && AUTOFILL_DETAILS.includes(norm(detail));
+}
+
+// 계획 금액을 금액 칸에 채웁니다.
+// 사용자가 이미 입력한 값이 있으면 건드리지 않습니다.
+function autofillPlanAmount(plan) {
+  if (!plan || plan <= 0) return;
+  if (editingIndex !== null) return;        // 수정 중에는 원래 금액을 지키기
+  if (getAmountValue() > 0) return;         // 이미 입력한 값이 있으면 그대로
+
+  setAmountValue(plan);
+  const box = el("amount");
+  box.classList.add("is-autofilled");
+  setTimeout(() => box.classList.remove("is-autofilled"), 1200);
+  showStatus(`계획 금액 ${fmtWon(plan)}을 넣었어요. 실제 금액이 다르면 고쳐주세요.`, false);
+}
+
 async function updateItemStatus() {
   const major = el("major").value;
   const minor = el("minor").value;
@@ -1444,8 +1466,13 @@ async function updateItemStatus() {
     const target = group.rows.find(
       (r) => r.detail === detail && (!needsMinor || r.minor === minor)
     );
-    if (target) paintStatus(el("stDetail"), val(target.row, 0), val(target.row, 1), isIncome);
-    else if (el("stDetail")) el("stDetail").hidden = true;
+    if (target) {
+      const tPlan = val(target.row, 0);
+      paintStatus(el("stDetail"), tPlan, val(target.row, 1), isIncome);
+      if (isAutofillTarget(major, detail)) autofillPlanAmount(tPlan);
+    } else if (el("stDetail")) {
+      el("stDetail").hidden = true;
+    }
   } catch (e) {
     boxes.forEach((b) => b && (b.hidden = true));
   }
