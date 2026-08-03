@@ -624,6 +624,7 @@ function startEdit(row) {
   el("memo").value = norm(memo);
   const amt = Number(amount || 0);
   setAmountValue(Math.abs(amt));
+  autofilledAmount = null;   // 기존 내역의 금액은 자동으로 바꾸지 않습니다
   syncFlowPick();
   setFlow(amt < 0 ? "out" : "in");
 
@@ -641,6 +642,7 @@ function startEdit(row) {
 function cancelEdit() {
   editingIndex = null;
   editingOriginal = null;
+  autofilledAmount = null;
   el("editBanner").hidden = true;
   el("submitBtn").textContent = "입력";
   el("cancelEditBtn").hidden = true;
@@ -728,6 +730,7 @@ async function handleSubmit(e) {
       showToast("saved", "저장 완료!");
       el("amount").value = "";
       el("memo").value = "";
+      autofilledAmount = null;
     }
     allRowsCache = null;
     calLoadedKey = null;   // 달력도 다시 읽도록
@@ -1429,6 +1432,10 @@ function syncFlowPick() {
 // 매달 금액이 달라져 시트를 확인해야 하는 ISA 두 계좌만 대상으로 합니다.
 const AUTOFILL_DETAILS = ["소희 ISA", "준우 ISA"];
 
+// 지금 금액 칸의 값이 "자동으로 채워진 것"인지 기억합니다.
+// 사용자가 직접 고친 값은 덮어쓰지 않되, 자동으로 넣은 값은 항목이 바뀌면 갱신합니다.
+let autofilledAmount = null;
+
 function isAutofillTarget(major, detail) {
   return INCOME_MAJORS.includes(major) && AUTOFILL_DETAILS.includes(norm(detail));
 }
@@ -1439,9 +1446,15 @@ function autofillPlanAmount(plan) {
   if (!plan || plan <= 0) return;
   if (editingIndex !== null) return;        // 수정 중에는 원래 금액을 지키기
   if (amountFlow === "out") return;         // 인출 중에는 계획 금액을 넣지 않습니다
-  if (getAmountValue() > 0) return;         // 이미 입력한 값이 있으면 그대로
+
+  const cur = getAmountValue();
+  // 값이 있는데 그게 사용자가 직접 넣은 것이면 건드리지 않습니다.
+  // 자동으로 채웠던 값이면 새 항목의 계획 금액으로 바꿔줍니다.
+  if (cur > 0 && cur !== autofilledAmount) return;
+  if (cur === plan) return;                 // 이미 같은 값이면 그대로
 
   setAmountValue(plan);
+  autofilledAmount = plan;
   const box = el("amount");
   box.classList.add("is-autofilled");
   setTimeout(() => box.classList.remove("is-autofilled"), 1200);
@@ -1502,7 +1515,13 @@ async function updateItemStatus() {
     if (target) {
       const tPlan = val(target.row, 0);
       paintStatus(el("stDetail"), tPlan, val(target.row, 1), isIncome);
-      if (isAutofillTarget(major, detail)) autofillPlanAmount(tPlan);
+      if (isAutofillTarget(major, detail)) {
+        autofillPlanAmount(tPlan);
+      } else if (autofilledAmount !== null && getAmountValue() === autofilledAmount) {
+        // 자동으로 넣었던 금액이 남아있으면 비웁니다 (다른 항목에는 맞지 않으므로)
+        setAmountValue(0);
+        autofilledAmount = null;
+      }
     } else if (el("stDetail")) {
       el("stDetail").hidden = true;
     }
@@ -2168,6 +2187,7 @@ async function init() {
 
   // 금액 입력 중 천 단위 콤마를 실시간으로 적용합니다.
   el("amount").addEventListener("input", (e) => {
+    autofilledAmount = null;   // 직접 고친 값은 자동으로 바꾸지 않습니다
     const input = e.target;
     const before = input.value;
     const caretFromEnd = before.length - (input.selectionStart ?? before.length);
