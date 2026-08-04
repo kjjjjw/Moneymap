@@ -1648,10 +1648,20 @@ function applyQuickItem(it, chip) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 고정비 한번에 입력
+// 자동이체 한번에 입력
 // ═══════════════════════════════════════════════════════════
-// 매달 비슷하게 나가는 고정비를 계획 시트에서 불러와 한 번에 넣습니다.
-const FIXED_MAJORS = ["고정비"];   // 대상 대분류
+// 매달 자동이체로 나가는 항목을 계획 시트에서 불러와 한 번에 넣습니다.
+// 매달 자동이체로 빠져나가는 항목들. (소분류, 세부항목)으로 지정합니다.
+// 대분류는 시트 구조에서 자동으로 찾으므로 적지 않아도 됩니다.
+const AUTO_TRANSFER_ITEMS = [
+  ["비상금", "현금 (다올)"],
+  ["통신비", "준우"],
+  ["통신비", "소희"],
+  ["보험비", "준우"],
+  ["보험비", "소희"],
+  ["용돈",   "준우"],
+  ["용돈",   "소희"]
+];
 
 let fixedItems = [];        // { minor, detail, plan, checked, already }
 let fixedWriter = null;
@@ -1720,10 +1730,17 @@ async function loadFixedItems(st) {
     return;
   }
 
-  const groups = st.groups.filter((g) => FIXED_MAJORS.includes(g.major));
-  const rows = groups.flatMap((g) => g.rows);
+  // 지정한 (소분류, 세부항목)을 시트 구조에서 찾습니다. 대분류는 자동으로 붙습니다.
+  const rows = [];
+  for (const [minor, detail] of AUTO_TRANSFER_ITEMS) {
+    for (const g of st.groups) {
+      const hit = g.rows.find((r) => r.minor === minor && r.detail === detail);
+      if (hit) { rows.push({ ...hit, major: g.major }); break; }
+    }
+  }
+
   if (!rows.length) {
-    list.innerHTML = "<p class='fixed-loading'>고정비 항목을 찾지 못했습니다.</p>";
+    list.innerHTML = "<p class='fixed-loading'>자동이체 항목을 찾지 못했습니다.</p>";
     fixedItems = [];
     updateFixedSummary();
     return;
@@ -1731,24 +1748,27 @@ async function loadFixedItems(st) {
 
   const fileId = await getFileId();
 
-  // 계획 금액 읽기 + 이미 입력된 내역 확인을 동시에
-  const [planRange, existing] = await Promise.all([
+  // 항목이 지출 표와 소득 표에 나뉘어 있으므로 양쪽 모두에서 중복을 확인합니다.
+  const [planRange, expRows, incRows] = await Promise.all([
     fetchSummaryRange(cols, rows.map((r) => r.row)),
-    graphFetch(`${tablePath(fileId, APP_CONFIG.tableName)}/rows`)
+    graphFetch(`${tablePath(fileId, APP_CONFIG.tableName)}/rows`),
+    graphFetch(`${tablePath(fileId, APP_CONFIG.incomeTableName)}/rows`)
   ]);
 
   const already = new Set();
-  for (const r of (existing.value || [])) {
-    const v = (r.values && r.values[0]) || [];
-    if (!toDateInput(v[0]).startsWith(key)) continue;
-    already.add([norm(v[1]), norm(v[2]), norm(v[3])].join("|"));
+  for (const src of [expRows, incRows]) {
+    for (const r of (src.value || [])) {
+      const v = (r.values && r.values[0]) || [];
+      if (!toDateInput(v[0]).startsWith(key)) continue;
+      already.add([norm(v[1]), norm(v[2]), norm(v[3])].join("|"));
+    }
   }
 
   fixedItems = rows.map((r) => {
     const plan = Number(cellFromRange(planRange, cols[0], r.row) || 0);
-    const sig = ["고정비", r.minor, r.detail].join("|");
-    const dup = already.has(sig);
+    const dup = already.has([r.major, r.minor, r.detail].join("|"));
     return {
+      major: r.major,
       minor: r.minor,
       detail: r.detail,
       plan,
@@ -1784,8 +1804,8 @@ function renderFixedList() {
     const nameBox = document.createElement("span");
     nameBox.className = "fixed-name";
     nameBox.innerHTML = `
-      <b>${item.detail}</b>
-      <em>${item.minor}</em>
+      <b>${item.minor} · ${item.detail}</b>
+      <em>${item.major}</em>
       ${item.already ? '<span class="fixed-done-tag">입력됨</span>' : ""}
     `;
 
@@ -1835,20 +1855,28 @@ async function submitFixed() {
 
   const key = fixedMonthKey();
   const [y, m] = key.split("-");
-  // 그 달 1일로 기록합니다.
-  const dateStr = `${y}-${m}-01`;
+  const dateStr = `${y}-${m}-01`;   // 그 달 1일로 기록합니다
 
   try {
     const fileId = await getFileId();
-    const values = picked.map((i) => [
-      dateStr, "고정비", i.minor, i.detail, "고정비 자동입력", i.amount, fixedWriter
-    ]);
 
-    // 표에 여러 행을 한 번에 넣습니다.
-    await graphFetch(`${tablePath(fileId, APP_CONFIG.tableName)}/rows/add`, {
-      method: "POST",
-      body: JSON.stringify({ values })
-    });
+    // 소득·저축 항목과 지출 항목은 서로 다른 표에 들어갑니다.
+    const buckets = { expense: [], income: [] };
+    for (const i of picked) {
+      const where = INCOME_MAJORS.includes(i.major) ? "income" : "expense";
+      buckets[where].push([
+        dateStr, i.major, i.minor, i.detail, "자동이체 입력", i.amount, fixedWriter
+      ]);
+    }
+
+    for (const [where, values] of Object.entries(buckets)) {
+      if (!values.length) continue;
+      const table = where === "income" ? APP_CONFIG.incomeTableName : APP_CONFIG.tableName;
+      await graphFetch(`${tablePath(fileId, table)}/rows/add`, {
+        method: "POST",
+        body: JSON.stringify({ values })
+      });
+    }
     await recalc(fileId);
 
     closeFixedSheet();
@@ -2155,7 +2183,7 @@ async function init() {
   });
   setWriter(currentWriter);   // 마지막에 고른 사람을 기억합니다
 
-  // 고정비 한번에 입력
+  // 자동이체 한번에 입력
   el("fixedBtn").addEventListener("click", openFixedSheet);
   el("fixedClose").addEventListener("click", closeFixedSheet);
   el("fixedDim").addEventListener("click", closeFixedSheet);
