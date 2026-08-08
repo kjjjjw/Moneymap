@@ -1,4 +1,4 @@
-const CACHE_NAME = "gagyebu-shell-v32";
+const CACHE_NAME = "gagyebu-shell-v33";
 
 // 앱 껍데기 — 없으면 동작이 막히는 필수 파일
 const CORE_FILES = [

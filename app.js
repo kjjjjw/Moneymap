@@ -162,31 +162,38 @@ function fillSelect(sel, items, selected) {
 }
 
 // ── 입력 모드: 지출 / 소득 ──────────────────────────────────
-// 지출은 기존 CATEGORY_TREE(하드코딩)를 그대로 쓰고,
-// 소득은 가계부_월별 시트에서 자동 인식한 구조(getStructure)를 그대로 재사용합니다.
-// 그래서 시트에 소득/저축 항목이 추가돼도 카테고리 목록이 저절로 따라옵니다.
+// 지출·소득 모두 가계부_월별 시트에서 자동으로 분류를 읽어옵니다.
+// 시트에 항목을 추가하면 앱 드롭다운에도 저절로 따라옵니다.
+// (시트를 못 읽으면 config.js의 CATEGORY_TREE로 되돌아갑니다)
 let entryMode = "expense"; // "expense" | "income"
-let incomeCategoryTree = null; // { 대분류: { 소분류(""면 무분류): [세부항목...] } }
+let incomeCategoryTree = null;  // { 대분류: { 소분류(""면 무분류): [세부항목...] } }
+let expenseCategoryTree = null; // 위와 같은 형태 (지출용)
 const INCOME_MAJORS = ["소득", "저축·투자"];
 const NO_MINOR = ""; // 소분류가 없는 항목(예: 소득)의 자리표시 키
 
-function buildIncomeTree(st) {
+// 시트 구조에서 원하는 대분류만 골라 분류 트리를 만듭니다.
+function buildTreeFrom(st, wantIncome) {
   const tree = {};
   for (const g of st.groups) {
-    if (!INCOME_MAJORS.includes(g.major)) continue;
+    const isIncome = INCOME_MAJORS.includes(g.major);
+    if (isIncome !== wantIncome) continue;
     const minors = {};
     for (const r of g.rows) {
       const key = r.minor || NO_MINOR;
       if (!minors[key]) minors[key] = [];
-      minors[key].push(r.detail);
+      if (!minors[key].includes(r.detail)) minors[key].push(r.detail);
     }
     tree[g.major] = minors;
   }
   return tree;
 }
 
+function buildIncomeTree(st) { return buildTreeFrom(st, true); }
+function buildExpenseTree(st) { return buildTreeFrom(st, false); }
+
 function currentCategoryTree() {
-  return entryMode === "income" ? (incomeCategoryTree || {}) : CATEGORY_TREE;
+  if (entryMode === "income") return incomeCategoryTree || {};
+  return expenseCategoryTree || CATEGORY_TREE;   // 시트를 아직 못 읽었으면 예비값
 }
 
 function currentTableName() {
@@ -234,6 +241,15 @@ async function ensureIncomeTree() {
   const st = await getStructure();
   incomeCategoryTree = buildIncomeTree(st);
   return incomeCategoryTree;
+}
+
+async function ensureExpenseTree() {
+  if (expenseCategoryTree) return expenseCategoryTree;
+  const st = await getStructure();
+  const tree = buildExpenseTree(st);
+  // 시트에서 지출 분류를 못 찾으면 예비값을 그대로 씁니다.
+  if (Object.keys(tree).length) expenseCategoryTree = tree;
+  return expenseCategoryTree;
 }
 
 async function setEntryMode(mode) {
@@ -2152,6 +2168,10 @@ function showApp() {
     localStorage.removeItem("gagyebu_fileId");
     msalInstance.logoutRedirect();
   });
+  // 시트에서 지출 분류를 읽어와 드롭다운을 최신 상태로 맞춥니다.
+  ensureExpenseTree()
+    .then(() => { if (entryMode === "expense") populateMajor(); })
+    .catch(() => {});   // 실패하면 config.js의 예비 목록을 씁니다
   loadRows(true);
   populateRecentMonths();
   loadQuickItems(false);
@@ -2227,10 +2247,23 @@ async function init() {
     input.setSelectionRange(pos, pos);
   });
   el("cancelEditBtn").addEventListener("click", cancelEdit);
-  el("refreshBtn").addEventListener("click", () => {
+  el("refreshBtn").addEventListener("click", async () => {
+    // 시트 구조(분류 목록)까지 다시 읽어서, 엑셀에 추가한 항목이 바로 보이게 합니다.
+    sheetStructure = null;
+    expenseCategoryTree = null;
+    incomeCategoryTree = null;
     allRowsCache = null;
+    clearStatusCache();
+    try {
+      if (entryMode === "income") await ensureIncomeTree();
+      else await ensureExpenseTree();
+      const keep = [el("major").value, el("minor").value, el("detail").value];
+      populateMajor(keep[0], keep[1], keep[2]);
+    } catch (e) { /* 목록 갱신 실패는 조용히 넘어갑니다 */ }
     loadRows(true);
     populateRecentMonths();
+    loadQuickItems(true);
+    loadMonthCard();
   });
 
   el("recentMonth").addEventListener("change", (e) => {
